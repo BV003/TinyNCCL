@@ -17,8 +17,9 @@ import sys
 import torch
 from torch.utils.cpp_extension import load, include_paths
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_SRC = os.path.join(_HERE, "src")
+_HERE = os.path.dirname(os.path.abspath(__file__))      # scripts/
+_PROJECT = os.path.dirname(_HERE)                        # project root
+_SRC = os.path.join(_PROJECT, "src")                    # project/src (sibling of scripts)
 _CU = os.path.join(_SRC, "ring_allreduce.cu")
 
 
