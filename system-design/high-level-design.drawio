@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="High-Level Design" id="hld-diagram">
-    <mxGraphModel dx="2387" dy="1580" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1400" math="0" shadow="0">
+    <mxGraphModel dx="895" dy="593" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1400" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -34,7 +34,7 @@
         <mxCell id="hld-b3t" parent="hld-b3" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="3 · Collective Algorithm Layer  (src/ring_allreduce.cu · src/tree_allreduce.cu)" vertex="1">
           <mxGeometry height="20" width="700" x="10" y="6" as="geometry" />
         </mxCell>
-        <mxCell id="hld-b3a" parent="hld-b3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="★ Ring AllReduce (must)&lt;br&gt;ReduceScatter: N-1 steps&lt;br&gt;→ AllGather: N-1 steps" vertex="1">
+        <mxCell id="hld-b3a" parent="hld-b3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="Ring AllReduce (must)&lt;br&gt;ReduceScatter: N-1 steps&lt;br&gt;→ AllGather: N-1 steps" vertex="1">
           <mxGeometry height="120" width="250" x="280" y="30" as="geometry" />
         </mxCell>
         <mxCell id="hld-b3b" parent="hld-b3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="☆ Tree AllReduce (optional)&lt;br&gt;better for small messages" vertex="1">

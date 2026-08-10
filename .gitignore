@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# draw.io backups
+.$*.drawio.bkp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.venv/
+venv/
+
+# torch cpp_extension build artifacts
+build/
+*.o
+*.so
+*.a
+
+# Benchmark / experiment data
+*.npy
+*.npz
+*.log
+results/
