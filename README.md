@@ -1,5 +1,9 @@
 # TinyNCCL
 
-## 学习目的
+## 学习目的 / Learning Purpose
 
-I do this project for learning about NCCL and Distributed system
+I do this project for learning about NCCL and Distributed system.
+
+## Hardware Requirements
+
+2* A5000
