@@ -1,6 +1,6 @@
 # TinyNCCL
 
-## 学习目的 / Learning Purpose
+## Learning Purpose
 
 I do this project for learning about NCCL and Distributed system.
 
