@@ -23,3 +23,5 @@ build/
 *.npz
 *.log
 results/
+
+.bkp
