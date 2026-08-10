@@ -1,0 +1,201 @@
+<mxfile host="Electron">
+  <diagram name="High-Level Design" id="hld-diagram">
+    <mxGraphModel dx="2387" dy="1580" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="hld-b1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
+          <mxGeometry height="130" width="1000" x="40" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b1t" parent="hld-b1" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="1 · Application Layer" vertex="1">
+          <mxGeometry height="20" width="400" x="10" y="6" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b1a" parent="hld-b1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=middle;align=center;fontSize=12;" value="Python driver / train loop&lt;br&gt;(calls all_reduce on gradients)" vertex="1">
+          <mxGeometry height="70" width="240" x="280" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b1b" parent="hld-b1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=middle;align=center;fontSize=12;" value="Reference baseline&lt;br&gt;torch.distributed.all_reduce" vertex="1">
+          <mxGeometry height="70" width="280" x="560" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
+          <mxGeometry height="130" width="1000" x="40" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b2t" parent="hld-b2" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="2 · API Layer" vertex="1">
+          <mxGeometry height="20" width="400" x="10" y="6" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b2a" parent="hld-b2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=middle;align=center;fontSize=12;" value="tiny_nccl.all_reduce(ptr,&lt;br&gt;count, dtype, op=SUM)" vertex="1">
+          <mxGeometry height="70" width="240" x="280" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b2b" parent="hld-b2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=middle;align=center;fontSize=12;" value="Comm Context&lt;br&gt;world, rank, device,&lt;br&gt;backend, P2P status" vertex="1">
+          <mxGeometry height="70" width="280" x="560" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
+          <mxGeometry height="180" width="1000" x="40" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b3t" parent="hld-b3" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="3 · Collective Algorithm Layer  (src/ring_allreduce.cu · src/tree_allreduce.cu)" vertex="1">
+          <mxGeometry height="20" width="700" x="10" y="6" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b3a" parent="hld-b3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="★ Ring AllReduce (must)&lt;br&gt;ReduceScatter: N-1 steps&lt;br&gt;→ AllGather: N-1 steps" vertex="1">
+          <mxGeometry height="120" width="250" x="280" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b3b" parent="hld-b3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="☆ Tree AllReduce (optional)&lt;br&gt;better for small messages" vertex="1">
+          <mxGeometry height="60" width="160" x="560" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b3c" parent="hld-b3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="Chunking + pipeline&lt;br&gt;overlap comm &amp; compute" vertex="1">
+          <mxGeometry height="60" width="180" x="740" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b3d" parent="hld-b3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="Algorithm selector&lt;br&gt;small: Tree / large: Ring" vertex="1">
+          <mxGeometry height="50" width="180" x="740" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
+          <mxGeometry height="130" width="1000" x="40" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b4t" parent="hld-b4" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="4 · CUDA Kernel Layer" vertex="1">
+          <mxGeometry height="20" width="400" x="10" y="6" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b4a" parent="hld-b4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="reduce_kernel&lt;br&gt;element-wise op on chunk" vertex="1">
+          <mxGeometry height="70" width="240" x="280" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b4b" parent="hld-b4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="copy / recv kernel&lt;br&gt;peer or staged" vertex="1">
+          <mxGeometry height="70" width="160" x="560" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b4c" parent="hld-b4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="CUDA Streams + Events&lt;br&gt;async pipeline, sync points" vertex="1">
+          <mxGeometry height="70" width="180" x="740" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
+          <mxGeometry height="170" width="1000" x="40" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b5t" parent="hld-b5" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="5 · Communication / Transport Layer" vertex="1">
+          <mxGeometry height="20" width="500" x="10" y="6" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b5a" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="GPUDirect P2P&lt;br&gt;cudaMemcpyPeerAsync&lt;br&gt;(GPU↔GPU, no host copy)" vertex="1">
+          <mxGeometry height="110" width="240" x="280" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b5b" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="Peer access setup&lt;br&gt;cudaDeviceEnablePeerAccess" vertex="1">
+          <mxGeometry height="50" width="160" x="560" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b5c" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="Fallback: host staging&lt;br&gt;pinned mem + cudaMemcpy" vertex="1">
+          <mxGeometry height="50" width="180" x="740" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b5d" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="Capability probe&lt;br&gt;cudaDeviceCanAccessPeer / NVLink" vertex="1">
+          <mxGeometry height="50" width="360" x="560" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
+          <mxGeometry height="170" width="1000" x="40" y="920" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6t" parent="hld-b6" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="6 · Hardware Layer (single node, N GPUs)" vertex="1">
+          <mxGeometry height="20" width="500" x="10" y="6" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6g0" parent="hld-b6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=middle;align=center;fontSize=12;" value="GPU 0" vertex="1">
+          <mxGeometry height="70" width="100" x="280" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6g1" parent="hld-b6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=middle;align=center;fontSize=12;" value="GPU 1" vertex="1">
+          <mxGeometry height="70" width="100" x="400" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6g2" parent="hld-b6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=middle;align=center;fontSize=12;" value="GPU 2" vertex="1">
+          <mxGeometry height="70" width="100" x="520" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6g3" parent="hld-b6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=middle;align=center;fontSize=12;" value="GPU 3" vertex="1">
+          <mxGeometry height="70" width="100" x="640" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6h" parent="hld-b6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=middle;align=center;fontSize=12;" value="Host RAM&lt;br&gt;(staging fallback)" vertex="1">
+          <mxGeometry height="70" width="150" x="800" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6e1" edge="1" parent="hld-b6" source="hld-b6g0" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#d79b00;endArrow=classic;" target="hld-b6g1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6e1l" connectable="0" parent="hld-b6e1" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" value="NVLink" vertex="1">
+          <mxGeometry relative="1" x="-0.1" y="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hld-b6e2" edge="1" parent="hld-b6" source="hld-b6g1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#d79b00;endArrow=classic;" target="hld-b6g2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6e2l" connectable="0" parent="hld-b6e2" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" value="NVLink" vertex="1">
+          <mxGeometry relative="1" x="-0.1" y="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hld-b6e3" edge="1" parent="hld-b6" source="hld-b6g2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#d79b00;endArrow=classic;" target="hld-b6g3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6e3l" connectable="0" parent="hld-b6e3" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" value="NVLink" vertex="1">
+          <mxGeometry relative="1" x="-0.1" y="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hld-b6e4" edge="1" parent="hld-b6" source="hld-b6g3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#666666;dashed=1;endArrow=classic;" target="hld-b6h">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-b6e4l" connectable="0" parent="hld-b6e4" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" value="PCIe (fallback path)" vertex="1">
+          <mxGeometry relative="1" x="-0.1" y="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hld-v" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
+          <mxGeometry height="1010" width="560" x="1080" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-vt" parent="hld-v" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="Validation &amp; Benchmark  (tests/ · src/benchmark.py · src/topology.py)" vertex="1">
+          <mxGeometry height="20" width="520" x="10" y="6" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-v1" parent="hld-v" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=middle;align=center;fontSize=12;" value="tests/test_vs_torch_distributed.py&lt;br&gt;Correctness&lt;br&gt;random tensors × sizes × ops&lt;br&gt;result == torch.distributed" vertex="1">
+          <mxGeometry height="130" width="480" x="40" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-v2" parent="hld-v" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=middle;align=center;fontSize=12;" value="src/benchmark.py&lt;br&gt;Bandwidth&lt;br&gt;busbw = 2·(N-1)/N · S / t&lt;br&gt;TinyNCCL vs NCCL plot" vertex="1">
+          <mxGeometry height="120" width="480" x="40" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-v3" parent="hld-v" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=middle;align=center;fontSize=12;" value="src/topology.py&lt;br&gt;PCIe / NVLink topology detection&lt;br&gt;(nvidia-smi · sysfs)" vertex="1">
+          <mxGeometry height="100" width="480" x="40" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-v4" parent="hld-v" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=middle;align=center;fontSize=12;" value="Acceptance criteria&lt;br&gt;• Correct vs torch.distributed&lt;br&gt;• ≥ 70–80% of NCCL busbw&lt;br&gt;• Clean 500–800 LOC&lt;br&gt;• Docs + README" vertex="1">
+          <mxGeometry height="140" width="480" x="40" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-v5" parent="hld-v" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="Future work&lt;br&gt;• NVSwitch topo-aware scheduling&lt;br&gt;• Multi-node (InfiniBand / RoCE)&lt;br&gt;• RDMA GPUDirect" vertex="1">
+          <mxGeometry height="110" width="480" x="40" y="660" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-v6" parent="hld-v" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="How to run&lt;br&gt;pytest tests/&lt;br&gt;python src/benchmark.py&lt;br&gt;python src/topology.py" vertex="1">
+          <mxGeometry height="90" width="480" x="40" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-e1" edge="1" parent="1" source="hld-b1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-e2" edge="1" parent="1" source="hld-b2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-e3" edge="1" parent="1" source="hld-b3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-e4" edge="1" parent="1" source="hld-b4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-e5" edge="1" parent="1" source="hld-b5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-ev1" edge="1" parent="1" source="hld-v1" style="html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366;dashed=1;endArrow=classic;" target="hld-b2a">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-ev1l" connectable="0" parent="hld-ev1" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" value="validate" vertex="1">
+          <mxGeometry relative="1" x="-0.25" y="-1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hld-ev2" edge="1" parent="1" source="hld-v2" style="html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366;dashed=1;endArrow=classic;" target="hld-b1b">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-ev2l" connectable="0" parent="hld-ev2" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" value="compare" vertex="1">
+          <mxGeometry relative="1" x="-0.25" y="-1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hld-ev3" edge="1" parent="1" source="hld-v3" style="html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366;dashed=1;endArrow=classic;" target="hld-b5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hld-ev3l" connectable="0" parent="hld-ev3" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;" value="feeds" vertex="1">
+          <mxGeometry relative="1" x="-0.25" y="-1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
