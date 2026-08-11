@@ -20,7 +20,10 @@ from torch.utils.cpp_extension import load, include_paths
 _HERE = os.path.dirname(os.path.abspath(__file__))      # scripts/
 _PROJECT = os.path.dirname(_HERE)                        # project root
 _SRC = os.path.join(_PROJECT, "src")                    # project/src (sibling of scripts)
-_CU = os.path.join(_SRC, "ring_allreduce.cu")
+_SOURCES = [
+    os.path.join(_SRC, "kernels.cu"),
+    os.path.join(_SRC, "bindings.cpp"),
+]
 
 
 def _build():
@@ -28,8 +31,9 @@ def _build():
     # requires a source file; we point it at our ring_allreduce.cu.
     return load(
         name="tiny_nccl_ext",
-        sources=[_CU],
+        sources=_SOURCES,
         extra_cuda_cflags=["-O3", "-std=c++17"],
+        extra_include_paths=[_SRC],
         verbose=True,
     )
 
