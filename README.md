@@ -10,17 +10,17 @@ I do this project for learning about NCCL and Distributed system.
 
 ## Environment
 
-
 | Component      | Version         |
 |---------------|-----------------|
-| NVIDIA Driver  | ≥ 525.60        |
-| nvcc          | 12.6            |
+| NVIDIA Driver  | ≥ 13.0          |
+| nvcc          | 13.0            |
 | Python         | 3.12            |
-| PyTorch        | 2.5.1+cu126     |
+| PyTorch        | 2.5.1+cu130     |
 
 ## Build & Install
 
 ```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu130
 pip install -e .
 ```
 
