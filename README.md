@@ -19,9 +19,13 @@ I do this project for learning about NCCL and Distributed system.
 
 ## Build & Install
 
+`--no-build-isolation` is required: `pip install -e .` creates a temporary build
+environment that fetches a mismatched torch from PyPI, producing ABI-incompatible
+binaries. `--no-build-isolation` uses the system torch instead.
+
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cu130
-pip install -e .
+pip install -e . --no-build-isolation
 ```
 
 ## Run Tests
