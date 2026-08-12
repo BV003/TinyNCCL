@@ -5,9 +5,6 @@ def test_reduce_sum_scalar():
     a = torch.tensor([1.0], device="cuda")
     b = torch.tensor([2.0], device="cuda")
     dst = torch.empty(1, device="cuda")
-    print(f"a: shape={a.shape} dtype={a.dtype}")
-    print(f"b: shape={b.shape} dtype={b.dtype}")
-    print(f"dst: shape={dst.shape} dtype={dst.dtype}")
     tiny.tiny_reduce_sum(dst, a, b)
     assert dst[0].item() == 3.0
 

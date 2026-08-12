@@ -1,12 +1,4 @@
-import os
-
-os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "8.6")
-
 from setuptools import setup
-import torch.utils.cpp_extension
-
-torch.utils.cpp_extension._check_cuda_version = lambda *a, **kw: None
-
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
