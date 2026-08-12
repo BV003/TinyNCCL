@@ -1,4 +1,5 @@
 #include <torch/extension.h>
+#include <ATen/cuda/CUDAContext.h>
 #include "kernels.h"
 
 void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
