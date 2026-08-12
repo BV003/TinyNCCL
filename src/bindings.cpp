@@ -3,7 +3,7 @@
 #include "kernels.h"
 
 void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
-    TORCH_CHECK(a.sizes() == b.sizes(), "a and b must have same shape");
+    TORCH_CHECK(a.sizes().vec() == b.sizes().vec(), "a and b must have same shape");
     TORCH_CHECK(a.dtype() == torch::kFloat32, "only float32 supported");
     dst.resize_(a.sizes());
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
