@@ -9,7 +9,7 @@
 #   python build.py            # build in place + import check
 #
 # After building, from Python:
-#   from build import tiny     # tiny.tiny_launch_reduce_sum, ...
+#   import tiny                # tiny.tiny_reduce_sum, ...
 #=============================================================================
 import os
 import sys
@@ -30,7 +30,7 @@ def _build():
     # Compile the .cu into a python extension. Note: torch.cpp_extension
     # requires a source file; we point it at our ring_allreduce.cu.
     return load(
-        name="tiny_nccl_ext",
+        name="tiny",
         sources=_SOURCES,
         extra_cuda_cflags=["-O3", "-std=c++17"],
         extra_include_paths=[_SRC],

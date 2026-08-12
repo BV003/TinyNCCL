@@ -1,5 +1,5 @@
 import torch
-from build import tiny
+import tiny
 
 def test_reduce_sum_scalar():
     a = torch.tensor([1.0], device="cuda")
