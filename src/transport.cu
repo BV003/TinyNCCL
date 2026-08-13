@@ -26,19 +26,13 @@ bool p2p_available(int src_dev, int dst_dev) {
     if (src_dev == dst_dev) return true;
     check_dev_index(src_dev, dst_dev);
     if (g_p2p_supported[src_dev][dst_dev] == 0) {
-        int can = 0;
-        cudaError_t err = cudaDeviceCanAccessPeer(&can, src_dev, dst_dev);
-        if (err == cudaSuccess && can) {
-            cudaError_t e2 = cudaDeviceEnablePeerAccess(dst_dev, 0);
-            if (e2 == cudaSuccess || e2 == cudaErrorPeerAccessAlreadyEnabled) {
-                g_p2p_supported[src_dev][dst_dev] = 1;
-                g_peer_enabled[src_dev][dst_dev] = true;
-            } else {
-                g_p2p_supported[src_dev][dst_dev] = 2;
-            }
-        } else {
-            g_p2p_supported[src_dev][dst_dev] = 2;
+        cudaError_t err = cudaDeviceEnablePeerAccess(dst_dev, 0);
+        bool ok = (err == cudaSuccess || err == cudaErrorPeerAccessAlreadyEnabled);
+        if (!ok) {
+            cudaGetLastError();  // clear sticky error (e.g. cudaErrorPeerAccessUnsupported)
         }
+        g_p2p_supported[src_dev][dst_dev] = ok ? 1 : 2;
+        if (ok) g_peer_enabled[src_dev][dst_dev] = true;
     }
     return g_p2p_supported[src_dev][dst_dev] == 1;
 }
