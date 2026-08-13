@@ -34,11 +34,27 @@ def test_copy_peer():
     if torch.cuda.device_count() < 2:
         print("skip: need 2 GPUs")
         return
-    src = torch.randn(1 << 20, device="cuda:0")
+    n = 1 << 20
+    # cuda:0 -> cuda:1
+    src = torch.randn(n, device="cuda:0")
     dst = torch.empty_like(src, device="cuda:1")
     tiny.tiny_copy_peer(dst, src)
     torch.cuda.synchronize()
     assert torch.allclose(dst.cpu(), src.cpu())
+
+    # cuda:1 -> cuda:0
+    src = torch.randn(n, device="cuda:1")
+    dst = torch.empty_like(src, device="cuda:0")
+    tiny.tiny_copy_peer(dst, src)
+    torch.cuda.synchronize()
+    assert torch.allclose(dst.cpu(), src.cpu())
+
+    # same device
+    src = torch.randn(n, device="cuda:0")
+    dst = torch.empty_like(src, device="cuda:0")
+    tiny.tiny_copy_peer(dst, src)
+    torch.cuda.synchronize()
+    assert torch.allclose(dst, src)
     
 if __name__ == "__main__":
     test_reduce_sum_scalar()

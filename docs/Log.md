@@ -14,7 +14,7 @@ Step	What to build
 - [x] 2a	[reduce_kernel](Layer 4) — element-wise sum/max/min CUDA kernel on float32 tensors
 
 
-- [ ] 2b	[copy_kernel](Layer 4) — peer-to-peer data movement kernel (cudaMemcpyPeerAsync)
+- [x] 2b	[copy_kernel](Layer 4) — peer-to-peer data movement kernel (cudaMemcpyPeerAsync)
 
 
 - [ ] 2c	Ring AllReduce algorithm (Layer 3) — ReduceScatter (N-1 steps) + AllGather (N-1 steps), orchestrating send/recv + reduce on chunks
@@ -23,7 +23,7 @@ Step	What to build
 - [ ] 2d	CUDA streams + events for async pipeline (Layer 4)
 
 
-- [ ] 2e	Transport selection (Layer 5) — GPUDirect P2P vs host-staging fallback based on topology.py P2P results
+- [x] 2e	Transport selection (Layer 5) — GPUDirect P2P vs host-staging fallback based on topology.py P2P results
 
 
 3. tests/test_vs_torch_distributed.py (correctness)

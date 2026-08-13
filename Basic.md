@@ -9,3 +9,5 @@ AllReduce, AllReduce=ReduceScatter+AllGather
 Ring AllReduce
 
 use cuda API to fetch data between gpus, will choose NVLink or PCIe autoly.
+
+If 2 gpus can not link dirly, we use host(CPU) trans
