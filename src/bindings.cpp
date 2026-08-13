@@ -22,7 +22,7 @@ void tiny_copy_peer(torch::Tensor dst, torch::Tensor src) {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
     int src_dev = src.get_device();
     int dst_dev = dst.get_device();
-    tiny_copy_peer(
+    tiny_copy_peer_kernel(
         dst.data_ptr(),
         dst_dev,
         src.data_ptr(),

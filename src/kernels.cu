@@ -44,7 +44,7 @@ void ensure_peer_access(int a, int b) {
     g_peer_enabled[a][b] = true;
 }
 }  
-void tiny_copy_peer(
+void tiny_copy_peer_kernel(
     void* dst, int dst_dev,
     const void* src, int src_dev,
     size_t nbytes, cudaStream_t stream)
