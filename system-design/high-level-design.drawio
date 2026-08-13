@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="High-Level Design" id="hld-diagram">
-    <mxGraphModel dx="1432" dy="948" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1400" math="0" shadow="0">
+    <mxGraphModel dx="1404" dy="862" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1400" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -28,6 +28,9 @@
         <mxCell id="hld-b2b" parent="hld-b2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=middle;align=center;fontSize=12;" value="Comm Context&lt;br&gt;world, rank, device,&lt;br&gt;backend, P2P status" vertex="1">
           <mxGeometry height="70" width="280" x="560" y="35" as="geometry" />
         </mxCell>
+        <mxCell id="7Wlk0IujJDAckJ6PbckP-6" edge="1" parent="1" source="hld-b3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;" target="hld-b5t">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
         <mxCell id="hld-b3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
           <mxGeometry height="180" width="1000" x="40" y="380" as="geometry" />
         </mxCell>
@@ -47,42 +50,33 @@
           <mxGeometry height="50" width="180" x="740" y="100" as="geometry" />
         </mxCell>
         <mxCell id="hld-b4" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
-          <mxGeometry height="130" width="1000" x="40" y="580" as="geometry" />
+          <mxGeometry height="140" width="540" x="40" y="580" as="geometry" />
         </mxCell>
         <mxCell id="hld-b4t" parent="hld-b4" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="4 · CUDA Kernel Layer" vertex="1">
-          <mxGeometry height="20" width="400" x="10" y="6" as="geometry" />
+          <mxGeometry height="21.538461538461537" width="216" x="5.399999999999999" y="6.461538461538462" as="geometry" />
         </mxCell>
         <mxCell id="hld-b4a" parent="hld-b4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="reduce_kernel&lt;br&gt;element-wise op on chunk" vertex="1">
-          <mxGeometry height="70" width="240" x="280" y="35" as="geometry" />
-        </mxCell>
-        <mxCell id="hld-b4b" parent="hld-b4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="copy / recv kernel&lt;br&gt;peer or staged" vertex="1">
-          <mxGeometry height="70" width="160" x="560" y="35" as="geometry" />
+          <mxGeometry height="75.38461538461539" width="216" x="22.19" y="37.69230769230769" as="geometry" />
         </mxCell>
         <mxCell id="hld-b4c" parent="hld-b4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=middle;align=center;fontSize=12;" value="CUDA Streams + Events&lt;br&gt;async pipeline, sync points" vertex="1">
-          <mxGeometry height="70" width="180" x="740" y="35" as="geometry" />
+          <mxGeometry height="75.38461538461539" width="190" x="310" y="37.69230769230769" as="geometry" />
         </mxCell>
         <mxCell id="hld-b5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
-          <mxGeometry height="170" width="1000" x="40" y="730" as="geometry" />
+          <mxGeometry height="140" width="430" x="610" y="580" as="geometry" />
         </mxCell>
-        <mxCell id="hld-b5t" parent="hld-b5" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="5 · Communication / Transport Layer" vertex="1">
-          <mxGeometry height="20" width="500" x="10" y="6" as="geometry" />
+        <mxCell id="hld-b5t" parent="hld-b5" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="5 · Transport Layer" vertex="1">
+          <mxGeometry height="16.470588235294116" width="214.99999999999997" x="4.3" y="4.9411764705882355" as="geometry" />
         </mxCell>
         <mxCell id="hld-b5a" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="GPUDirect P2P&lt;br&gt;cudaMemcpyPeerAsync&lt;br&gt;(GPU↔GPU, no host copy)" vertex="1">
-          <mxGeometry height="110" width="240" x="280" y="30" as="geometry" />
+          <mxGeometry height="90.59" width="167.46756756756756" x="227.78378378378378" y="24.71" as="geometry" />
         </mxCell>
-        <mxCell id="hld-b5b" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="Peer access setup&lt;br&gt;cudaDeviceEnablePeerAccess" vertex="1">
-          <mxGeometry height="50" width="160" x="560" y="30" as="geometry" />
-        </mxCell>
-        <mxCell id="hld-b5c" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="Fallback: host staging&lt;br&gt;pinned mem + cudaMemcpy" vertex="1">
-          <mxGeometry height="50" width="180" x="740" y="30" as="geometry" />
-        </mxCell>
-        <mxCell id="hld-b5d" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="Capability probe&lt;br&gt;cudaDeviceCanAccessPeer / NVLink" vertex="1">
-          <mxGeometry height="50" width="360" x="560" y="90" as="geometry" />
+        <mxCell id="hld-b4b" parent="hld-b5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=middle;align=center;fontSize=12;" value="copy / recv kernel&lt;br&gt;peer or staged" vertex="1">
+          <mxGeometry height="57.65" width="167.46756756756756" x="30.099999999999994" y="41.18" as="geometry" />
         </mxCell>
         <mxCell id="hld-b6" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
-          <mxGeometry height="170" width="1000" x="40" y="920" as="geometry" />
+          <mxGeometry height="170" width="1000" x="40" y="780" as="geometry" />
         </mxCell>
-        <mxCell id="hld-b6t" parent="hld-b6" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="6 · Hardware Layer (single node, N GPUs)" vertex="1">
+        <mxCell id="hld-b6t" parent="hld-b6" style="text;html=1;whiteSpace=wrap;align=left;verticalAlign=middle;fontStyle=1;fontSize=13;strokeColor=none;fillColor=none;" value="6 · Hardware Layer&amp;nbsp;" vertex="1">
           <mxGeometry height="20" width="500" x="10" y="6" as="geometry" />
         </mxCell>
         <mxCell id="hld-b6g0" parent="hld-b6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=middle;align=center;fontSize=12;" value="GPU 0" vertex="1">
@@ -162,13 +156,7 @@
         <mxCell id="hld-e2" edge="1" parent="1" source="hld-b2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="hld-e3" edge="1" parent="1" source="hld-b3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b4">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="hld-e4" edge="1" parent="1" source="hld-b4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b5">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="hld-e5" edge="1" parent="1" source="hld-b5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;" target="hld-b6">
+        <mxCell id="hld-e3" edge="1" parent="1" source="hld-b3" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.272;exitY=0.989;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#666666;endArrow=classic;exitPerimeter=0;" target="hld-b4">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="hld-ev1" edge="1" parent="1" source="hld-v1" style="html=1;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#82b366;dashed=1;endArrow=classic;" target="hld-b2a">
@@ -194,6 +182,12 @@
           <mxGeometry relative="1" x="-0.25" y="-1" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
+        </mxCell>
+        <mxCell id="7Wlk0IujJDAckJ6PbckP-4" edge="1" parent="1" source="hld-b4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.272;entryY=0.02;entryDx=0;entryDy=0;entryPerimeter=0;" target="hld-b6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="7Wlk0IujJDAckJ6PbckP-5" edge="1" parent="1" source="hld-b5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.785;entryY=0.01;entryDx=0;entryDy=0;entryPerimeter=0;" target="hld-b6">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

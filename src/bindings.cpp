@@ -1,6 +1,7 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include "kernels.h"
+#include "transport.h"
 
 void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
     TORCH_CHECK(a.sizes().vec() == b.sizes().vec(), "a and b must have same shape");
@@ -22,7 +23,7 @@ void tiny_copy_peer(torch::Tensor dst, torch::Tensor src) {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
     int src_dev = src.get_device();
     int dst_dev = dst.get_device();
-    tiny_copy_peer_kernel(
+    transport_copy(
         dst.data_ptr(),
         dst_dev,
         src.data_ptr(),
