@@ -21,7 +21,8 @@ Step	What to build
 - [x] 2c	Ring AllReduce algorithm (Layer 3) — ReduceScatter (N-1 steps) + AllGather (N-1 steps), orchestrating send/recv + reduce on chunks (serial/synchronous version)
 
 
-- [ ] 2d	CUDA streams + events for async pipeline (Layer 4）
+- [x] 2d	CUDA streams + events for async pipeline
+让通信和计算同步进行
 
 - [ ] 2c ex. Async
 

@@ -12,9 +12,11 @@ std::array<std::array<int, kMaxDevices>, kMaxDevices> g_p2p_supported{};
 // peer access enabled once per ordered pair (a -> b)
 std::array<std::array<bool, kMaxDevices>, kMaxDevices> g_peer_enabled{};
 
-// cached pinned host buffer used by the host-staging fallback
-void* g_staging = nullptr;
-size_t g_staging_size = 0;
+// cached pinned host buffers used by the host-staging fallback, one per
+// destination device so that concurrent copies to different devices do not
+// overwrite each other's staging data.
+std::array<void*, kMaxDevices> g_staging{};
+std::array<size_t, kMaxDevices> g_staging_size{};
 
 void check_dev_index(int a, int b) {
     if (a >= kMaxDevices || b >= kMaxDevices)
@@ -37,24 +39,24 @@ bool p2p_available(int src_dev, int dst_dev) {
     return g_p2p_supported[src_dev][dst_dev] == 1;
 }
 
-void* get_staging(size_t nbytes) {
-    if (nbytes <= g_staging_size) return g_staging;
-    if (g_staging) cudaFreeHost(g_staging);
-    cudaError_t err = cudaHostAlloc(&g_staging, nbytes, cudaHostAllocPortable);
+void* get_staging(int dst_dev, size_t nbytes) {
+    if (nbytes <= g_staging_size[dst_dev]) return g_staging[dst_dev];
+    if (g_staging[dst_dev]) cudaFreeHost(g_staging[dst_dev]);
+    cudaError_t err = cudaHostAlloc(&g_staging[dst_dev], nbytes, cudaHostAllocPortable);
     if (err != cudaSuccess) {
-        g_staging = nullptr;
-        g_staging_size = 0;
+        g_staging[dst_dev] = nullptr;
+        g_staging_size[dst_dev] = 0;
         throw std::runtime_error(
             std::string("cudaHostAlloc failed: ") + cudaGetErrorString(err));
     }
-    g_staging_size = nbytes;
-    return g_staging;
+    g_staging_size[dst_dev] = nbytes;
+    return g_staging[dst_dev];
 }
 
 void copy_via_host(
-    void* dst, const void* src, size_t nbytes, cudaStream_t stream)
+    void* dst, int dst_dev, const void* src, size_t nbytes, cudaStream_t stream)
 {
-    void* host = get_staging(nbytes);
+    void* host = get_staging(dst_dev, nbytes);
     cudaError_t err = cudaMemcpyAsync(
         host, src, nbytes, cudaMemcpyDeviceToHost, stream);
     if (err != cudaSuccess) {
@@ -97,6 +99,6 @@ void transport_copy(
                 cudaGetErrorString(err));
         }
     } else {
-        copy_via_host(dst, src, nbytes, stream);
+        copy_via_host(dst, dst_dev, src, nbytes, stream);
     }
 }

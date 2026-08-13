@@ -28,8 +28,9 @@ pip install torch --index-url https://download.pytorch.org/whl/cu130
 pip install -e . --no-build-isolation
 ```
 
-## Run Tests
+## Run Tests and Benchmark
 
 ```bash
 python tests/test_kernels.py
+python scripts/benchmark.py   
 ```
