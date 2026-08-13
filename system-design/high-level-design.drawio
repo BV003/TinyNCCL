@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="High-Level Design" id="hld-diagram">
-    <mxGraphModel dx="1404" dy="862" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1400" math="0" shadow="0">
+    <mxGraphModel dx="858" dy="527" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1400" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -28,7 +28,7 @@
         <mxCell id="hld-b2b" parent="hld-b2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=middle;align=center;fontSize=12;" value="Comm Context&lt;br&gt;world, rank, device,&lt;br&gt;backend, P2P status" vertex="1">
           <mxGeometry height="70" width="280" x="560" y="35" as="geometry" />
         </mxCell>
-        <mxCell id="7Wlk0IujJDAckJ6PbckP-6" edge="1" parent="1" source="hld-b3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;" target="hld-b5t">
+        <mxCell id="7Wlk0IujJDAckJ6PbckP-6" edge="1" parent="1" source="hld-b3" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;" target="hld-b5t">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="hld-b3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fillColor=#fafafa;strokeColor=#bbbbbb;dashed=1;" value="" vertex="1">
