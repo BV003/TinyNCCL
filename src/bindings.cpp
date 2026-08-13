@@ -60,7 +60,7 @@ void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
         recv[i] = recvbuffs[i].data_ptr<float>();
     }
 
-    tiny_ring_allreduce_sum(send.data(), recv.data(), count, n);
+    tiny_ring_allreduce_sum_impl(send.data(), recv.data(), count, n);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

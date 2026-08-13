@@ -15,7 +15,7 @@
 // This is the serial (synchronous) version: it uses the default stream
 // (nullptr) so every transport copy and reduce completes before the next
 // operation starts.
-void tiny_ring_allreduce_sum(
+void tiny_ring_allreduce_sum_impl(
     float** send, float** recv, size_t count, int n_gpus)
 {
     if (n_gpus <= 0)

@@ -11,7 +11,7 @@
 // across all GPUs) is written to recv[i] for every i.
 //
 // Requires count % n_gpus == 0 (chunking). Serial (synchronous) version.
-void tiny_ring_allreduce_sum(
+void tiny_ring_allreduce_sum_impl(
     float** send, float** recv,
     size_t count, int n_gpus);
 
