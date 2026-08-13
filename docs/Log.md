@@ -24,7 +24,6 @@ Step	What to build
 - [x] 2d	CUDA streams + events for async pipeline
 让通信和计算同步进行
 
-- [ ] 2c ex. Async
 
 
 
