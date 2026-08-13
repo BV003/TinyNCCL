@@ -29,10 +29,21 @@ def test_reduce_sum_2d():
     dst = torch.empty(32, 64, device="cuda")
     tiny.tiny_reduce_sum(dst, a, b)
     assert torch.allclose(dst, a + b)
+
+def test_copy_peer():
+    if torch.cuda.device_count() < 2:
+        print("skip: need 2 GPUs")
+        return
+    src = torch.randn(1 << 20, device="cuda:0")
+    dst = torch.empty_like(src, device="cuda:1")
+    tiny.tiny_copy_peer(dst, src)
+    torch.cuda.synchronize()
+    assert torch.allclose(dst.cpu(), src.cpu())
     
 if __name__ == "__main__":
     test_reduce_sum_scalar()
     test_reduce_sum_small()
     test_reduce_sum_large()
     test_reduce_sum_2d()
+    test_copy_peer()
     print("All tests passed!")

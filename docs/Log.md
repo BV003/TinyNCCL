@@ -11,7 +11,7 @@ torchrun --nproc_per_node=2 smoke_test.py   # baseline NCCL all_reduce
 2. After Phase 0 is green, start on the core: src/ring_allreduce.cu
 Your build script (scripts/build.py) already expects this file — it's the heart of the project and everything else layers on top of it. In order within this file:
 Step	What to build
-- [ ] 2a	[reduce_kernel](Layer 4) — element-wise sum/max/min CUDA kernel on float32 tensors
+- [x] 2a	[reduce_kernel](Layer 4) — element-wise sum/max/min CUDA kernel on float32 tensors
 
 
 - [ ] 2b	[copy_kernel](Layer 4) — peer-to-peer data movement kernel (cudaMemcpyPeerAsync)
