@@ -1,7 +1,9 @@
 #include "kernels.h"
 
 #include <array>
+#include <cstddef>
 #include <stdexcept>
+#include <string>
 
 __global__ void reduce_sum_kernel(
     float* __restrict__ dst,
@@ -40,7 +42,7 @@ void ensure_peer_access(int a, int b) {
             cudaGetErrorString(err));
     }
     g_peer_enabled[a][b] = true;
-    }
+}
 }  
 void tiny_copy_peer(
     void* dst, int dst_dev,
