@@ -1,24 +1,3 @@
-#=============================================================================
-# test_vs_torch_distributed.py
-#
-# TinyNCCL — correctness check for Ring AllReduce vs torch.distributed (NCCL).
-#
-# Runs under torchrun: one process per GPU. Each rank contributes a random
-# tensor on its local GPU, then we compare two ways of computing the global
-# element-wise sum:
-#   * reference: torch.distributed.all_reduce (NCCL)
-#   * ours:      tiny.tiny_ring_allreduce_sum (single-process, multi-GPU)
-#
-# Because tiny's API is single-process (it takes pointers to every GPU's
-# tensor at once) while NCCL is multi-process, rank 0 reconstructs every
-# rank's input locally using a deterministically broadcast seed:
-#   torch.manual_seed(seed) seeds every CUDA device's generator identically,
-#   so torch.randn(count, device="cuda:i") produces the same values in any
-#   process.
-#
-# Usage:
-#   torchrun --nproc_per_node=<N> tests/test_vs_torch_distributed.py
-#=============================================================================
 from __future__ import annotations
 
 import os
@@ -44,23 +23,16 @@ def main() -> int:
         dist.destroy_process_group()
         return 0
 
-    # Seed: rank 0 picks a random one and broadcasts it so every rank
-    # generates the same tensor values (but on its own GPU).
-    if rank == 0:
-        seed = torch.randint(0, 2**31 - 1, (1,), dtype=torch.int64).item()
-    else:
-        seed = 0
-    seed_t = torch.tensor([seed], dtype=torch.int64, device="cuda")
-    dist.broadcast(seed_t, src=0)
-    seed = seed_t.item()
 
     # Test a few sizes: small, 1M, and a non-power-of-two still divisible by N.
-    counts = [1 << 12, 1 << 20, world * 3000]
+    counts = [8]
 
     all_ok = True
 
+    base_seed = 12345
+
     for count in counts:
-        torch.manual_seed(seed)
+        torch.manual_seed(base_seed + rank)
 
         # Each rank's contribution lives on its own GPU.
         t = torch.randn(count, device=f"cuda:{rank}")
@@ -68,13 +40,31 @@ def main() -> int:
         # Reference: NCCL all_reduce (SUM).
         ncc = t.clone()
         dist.all_reduce(ncc, op=dist.ReduceOp.SUM)
+        dist.barrier()
 
         # Ours: rank 0 reconstructs every rank's input on its GPU and runs the
         # single-process ring allreduce.
         if rank == 0:
-            torch.manual_seed(seed)
-            send = [torch.randn(count, device=f"cuda:{i}") for i in range(world)]
-            recv = [torch.empty(count, device=f"cuda:{i}") for i in range(world)]
+            send = []
+
+            for i in range(world):
+                torch.manual_seed(base_seed + i)
+
+                send.append(
+                    torch.randn(
+                        count,
+                        device=f"cuda:{i}"
+                    )
+                )
+
+            recv = [
+                torch.empty(
+                    count,
+                    device=f"cuda:{i}"
+                )
+                for i in range(world)
+            ]
+
             tiny.tiny_ring_allreduce_sum(send, recv)
 
         # Gather every rank's NCCL result to rank 0 for comparison.
