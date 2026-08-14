@@ -46,4 +46,5 @@ src/tree_allreduce.cu + algorithm selector (if you want both)
 
 - [ ] CUDA streams + events for async pipeline, 让通信和计算同步进行
 （未完成，目前由于设备限制，是每轮step后同步一次）
+- [ ] step 结尾的同步循环，不能 cudaSetDevice(i)，要同步每一个真实执行任务的 next 设备。
 - [ ] 4台设备进行之间的通信
