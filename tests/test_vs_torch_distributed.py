@@ -85,17 +85,17 @@ def main() -> int:
         dist.gather(ncc, gather_list=gather_list, dst=0)
 
         if rank == 0:
+            local_sum = sum(s.cpu() for s in send)
             ok = True
             for i in range(world):
                 got = recv[i].cpu()
                 ref = gather_list[i].cpu()
-                diff = (got - ref).abs()
-                max_err = diff.max().item()
-                n_bad = int((diff > 1e-5).sum().item())
+                d_local = int((got - local_sum).abs().gt(1e-5).sum().item())
+                d_nccl = int((got - ref).abs().gt(1e-5).sum().item())
                 match = torch.allclose(got, ref, atol=1e-5, rtol=1e-5)
                 ok = ok and match
                 status = "OK " if match else "FAIL"
-                print(f"  [count={count:>10}] gpu {i}: {status}  max_abs_err={max_err:.3e}  n_bad={n_bad}")
+                print(f"  [count={count:>10}] gpu {i}: {status}  tiny_vs_local={d_local}  tiny_vs_nccl={d_nccl}")
             if not ok:
                 all_ok = False
 
