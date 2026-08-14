@@ -31,6 +31,9 @@ import tiny
 
 
 def main() -> int:
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+
     dist.init_process_group(backend="nccl")
     rank = dist.get_rank()
     world = dist.get_world_size()
