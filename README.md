@@ -42,3 +42,9 @@ torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py > Logs/test.log 2
 TORCH_DISTRIBUTED_DEBUG=DETAIL torchrun --nproc_per_node=2 tests/ test_vs_torch_distributed.py 可以
 python scripts/benchmark.py   
 ```
+
+
+
+AI这个傻逼，一直在改，还改不好，每次都还贼慢
+
+回退到问答模式，自己来修改代码
