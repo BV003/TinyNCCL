@@ -44,6 +44,9 @@ python scripts/benchmark.py
 
 
 
-AI这个傻逼，一直在改，还改不好，每次都还贼慢
+## Now
 
-回退到问答模式，自己来修改代码
+
+/Users/michael/Documents/codehome/TinyNCCL/tests/test_fixed_data_two.py
+测试出来是遗留缓冲的问题，是transport_copy的问题，是cudamemcpy不支持跨进程
+NCCL不是这么做的CUDA‑IPC或者RDMA/TCP 网络
