@@ -90,25 +90,30 @@ void tiny_ring_allreduce_sum_impl(
     }
 
 
-    // 3. AllGather: n_gpus - 1 steps (copy only).
-    for (int step = 0; step < n_gpus - 1; step++) {
+    // 3. AllGather: n_gpus -1 steps
+    // After Reduce‑Scatter: device k holds complete sum at chunk index = k
+    for (int step = 0; step < n_gpus - 1; step++)
+    {
         printf("\n==== AllGather step = %d ====\n", step);
-        for (int i = 0; i < n_gpus; i++) {
-            int next = (i + 1) % n_gpus;
-            int idx = (i + 1 - step + n_gpus) % n_gpus;
+        for(int i = 0; i < n_gpus; i++)
+        {
+            int own_chunk = i;          // i设备自己拥有sum的chunk编号
+            int send_dst  = (i + 1) % n_gpus; //发给下一个GPU
 
-            printf("AG step=%d, i=%d, next=%d, chunk_idx=%d | copy dst_dev=%d recv+%zu from src_dev=%d recv+%zu\n",
-                   step, i, next, idx,
-                   next, idx*chunk,
-                   i, idx*chunk);
+            printf("AG step=%d dev=%d send own_chunk=%d to dev=%d, src recv+%zu -> dst recv+%zu\n",
+                   step, i, own_chunk, send_dst,
+                   own_chunk*chunk, own_chunk*chunk);
 
-            cudaSetDevice(next);
-            transport_copy(recv[next] + idx * chunk, next,
-                           recv[i] + idx * chunk, i,
-                           chunk * sizeof(float), stream[next]);
+            cudaSetDevice(send_dst);
+            transport_copy(
+                recv[send_dst] + own_chunk * chunk, send_dst,
+                recv[i]        + own_chunk * chunk, i,
+                chunk * sizeof(float), stream[send_dst]);
         }
-        // 【修复step末尾同步：遍历全部设备，每个都同步，而不是同步i】
-        for (int dev = 0; dev < n_gpus; dev++) {
+
+        // 每一步结束，同步全部GPU
+        for(int dev = 0; dev < n_gpus; dev++)
+        {
             cudaSetDevice(dev);
             cudaDeviceSynchronize();
         }
@@ -117,41 +122,25 @@ void tiny_ring_allreduce_sum_impl(
         if (n_gpus == 2 && count == 16) {
             for (int i = 0; i < n_gpus; i++) {
                 cudaSetDevice(i);
-
                 std::vector<float> debug(count);
-
-                cudaMemcpy(
-                    debug.data(),
-                    recv[i],
-                    count * sizeof(float),
-                    cudaMemcpyDeviceToHost
-                );
-
+                cudaMemcpy(debug.data(), recv[i], count * sizeof(float), cudaMemcpyDeviceToHost);
                 printf("[DEBUG AG] GPU %d\n", i);
-
                 printf("  chunk0: ");
-                for (int j = 0; j < static_cast<int>(chunk); j++) {
-                    printf("%.2f ", debug[j]);
-                }
-
+                for (int j = 0; j < static_cast<int>(chunk); j++) printf("%.2f ", debug[j]);
                 printf("\n  chunk1: ");
-                for (int j = 0; j < static_cast<int>(chunk); j++) {
-                    printf("%.2f ", debug[chunk + j]);
-                }
-
+                for (int j = 0; j < static_cast<int>(chunk); j++) printf("%.2f ", debug[chunk + j]);
                 printf("\n");
             }
         }
         //debug
     }
 
-    // ========== 函数末尾全设备同步，保留 ==========
+    // 全局最终同步（保留）
     for (int dev = 0; dev < n_gpus; dev++)
     {
         cudaSetDevice(dev);
         cudaDeviceSynchronize();
     }
-    // ====================================
 
     // Cleanup.
     for (int i = 0; i < n_gpus; i++) {
