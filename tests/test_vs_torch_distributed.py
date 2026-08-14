@@ -77,20 +77,46 @@ def main() -> int:
         if rank == 0:
             local_sum = sum(s.cpu() for s in send)
             ok = True
+
+            # 先校验：CPU求和 和 gather过来的NCCL参考本身是否一致
+            ref0 = gather_list[0].cpu()
+            ref_err = int((local_sum - ref0).abs().gt(1e-5).sum().item())
+            print(f"  [count={count:>10}] CHECK_REF: cpu_sum vs nccl_ref errors = {ref_err}")
+            if ref_err > 0:
+                print("  !!! WARNING: CPU sum and NCCL reference themselves differ! seed/gather problem!")
+
             for i in range(world):
                 got = recv[i].cpu()
                 ref = gather_list[i].cpu()
-                d_local = int((got - local_sum).abs().gt(1e-5).sum().item())
-                d_nccl = int((got - ref).abs().gt(1e-5).sum().item())
+
+                # tiny输出 vs CPU直接求和
+                err_mask_local = (got - local_sum).abs() > 1e-5
+                d_local = int(err_mask_local.sum().item())
+                bad_idx_local = torch.nonzero(err_mask_local).squeeze(-1)
+
+                # tiny输出 vs NCCL参考
+                err_mask_nccl = (got - ref).abs() > 1e-5
+                d_nccl = int(err_mask_nccl.sum().item())
+                bad_idx_nccl = torch.nonzero(err_mask_nccl).squeeze(-1)
+
+                match_local = (d_local == 0)
+                match_nccl = (d_nccl == 0)
                 match = torch.allclose(got, ref, atol=1e-5, rtol=1e-5)
                 ok = ok and match
+
                 status = "OK " if match else "FAIL"
-                print(f"  [count={count:>10}] gpu {i}: {status}  tiny_vs_local={d_local}  tiny_vs_nccl={d_nccl}")
+                print(f"  [count={count:>10}] gpu {i}: {status}")
+                print(f"      tiny_vs_cpu_sum: err_cnt={d_local}, match={match_local}")
+                print(f"      tiny_vs_nccl_ref: err_cnt={d_nccl}, match={match_nccl}")
+                if d_local > 0:
+                    # 最多打印前10个出错下标
+                    show = bad_idx_local[:10].tolist()
+                    print(f"      -> bad indices (vs cpu sum): {show}{' ...' if len(bad_idx_local)>10 else ''}")
+
             if not ok:
                 all_ok = False
 
         dist.barrier()
-
     if rank == 0:
         print("PASS: ring allreduce matches NCCL" if all_ok else "FAIL: mismatch detected")
     dist.destroy_process_group()
