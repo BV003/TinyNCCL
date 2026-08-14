@@ -6,19 +6,6 @@
 #include "transport.h"
 #include "kernels.h"
 
-// Ring AllReduce = ReduceScatter (N-1 steps) + AllGather (N-1 steps).
-//
-// Each rank owns one dedicated copy stream. The copy and the reduce are issued
-// on the SAME stream so that stream ordering (a hard CUDA guarantee) makes the
-// reduce wait for the copy to finish. An earlier version used a separate
-// compute stream + cudaEvent to express that dependency, but cudaMemcpyPeerAsync
-// completion on this topology was not reliably captured by the event, causing a
-// copy/reduce race (non-deterministic wrong results).
-//
-// Steps are separated by cudaDeviceSynchronize to satisfy the cross-rank
-// dependency (rank i's receive in step s needs prev's reduce from step s-1).
-// NOTE: this does NOT implement communication/computation overlap via double
-// buffering; that is a separate, later optimization.
 void tiny_ring_allreduce_sum_impl(
     float** send, float** recv, size_t count, int n_gpus)
 {
