@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <stdexcept>
+#include <cstdio>
 
 #include "transport.h"
 #include "kernels.h"
@@ -56,7 +57,38 @@ void tiny_ring_allreduce_sum_impl(
             cudaSetDevice(i);
             cudaDeviceSynchronize();
         }
+        //debug
+            if (n_gpus == 2 && count == 16) {
+        for (int i = 0; i < n_gpus; i++) {
+            cudaSetDevice(i);
+
+            std::vector<float> debug(count);
+
+            cudaMemcpy(
+                debug.data(),
+                recv[i],
+                count * sizeof(float),
+                cudaMemcpyDeviceToHost
+            );
+
+            printf("[DEBUG RS] GPU %d\n", i);
+
+            printf("  chunk0: ");
+            for (int j = 0; j < static_cast<int>(chunk); j++) {
+                printf("%.2f ", debug[j]);
+            }
+
+            printf("\n  chunk1: ");
+            for (int j = 0; j < static_cast<int>(chunk); j++) {
+                printf("%.2f ", debug[chunk + j]);
+            }
+
+            printf("\n");
+        }
     }
+    //debug
+    }
+
 
     // 3. AllGather: n_gpus - 1 steps (copy only).
     for (int step = 0; step < n_gpus - 1; step++) {
@@ -73,6 +105,36 @@ void tiny_ring_allreduce_sum_impl(
             cudaSetDevice(i);
             cudaDeviceSynchronize();
         }
+        //debug
+        if (n_gpus == 2 && count == 16) {
+    for (int i = 0; i < n_gpus; i++) {
+        cudaSetDevice(i);
+
+        std::vector<float> debug(count);
+
+        cudaMemcpy(
+            debug.data(),
+            recv[i],
+            count * sizeof(float),
+            cudaMemcpyDeviceToHost
+        );
+
+        printf("[DEBUG AG] GPU %d\n", i);
+
+        printf("  chunk0: ");
+        for (int j = 0; j < static_cast<int>(chunk); j++) {
+            printf("%.2f ", debug[j]);
+        }
+
+        printf("\n  chunk1: ");
+        for (int j = 0; j < static_cast<int>(chunk); j++) {
+            printf("%.2f ", debug[chunk + j]);
+        }
+
+        printf("\n");
+    }
+}
+//debug
     }
 
     // Cleanup.
