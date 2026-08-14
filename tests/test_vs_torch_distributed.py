@@ -25,7 +25,7 @@ def main() -> int:
 
 
     # Test a few sizes: small, 1M, and a non-power-of-two still divisible by N.
-    counts = [8, 4096]
+    counts = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
 
     all_ok = True
 
