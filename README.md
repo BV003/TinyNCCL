@@ -36,6 +36,8 @@ pip install -e . --no-build-isolation
 ## Run Tests and Benchmark
 
 ```bash
+torchrun --nproc_per_node=2 tests/smoke_test.py
 python tests/test_kernels.py
+torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py
 python scripts/benchmark.py   
 ```
