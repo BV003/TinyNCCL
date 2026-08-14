@@ -21,20 +21,29 @@ torchrun --nproc_per_node=2 smoke_test.py
 
 - [x] 2d	Ring AllReduce algorithm (Layer 3) — ReduceScatter (N-1 steps) + AllGather (N-1 steps), orchestrating send/recv + reduce on chunks (serial/synchronous version)
 
-- [ ] 2e	CUDA streams + events for async pipeline,让通信和计算同步进行
 
 
 
 
 ## Phase 3
-tests/test_vs_torch_distributed.py (correctness)
-Once ring_allreduce.cu compiles, write this next — validate against torch.distributed.all_reduce on random tensors.
+Correctness
+
+validate against torch.distributed.all_reduce on random tensors.
 
 
-4. src/benchmark.py (performance)
+## Phase 4
+Performance
+
 Bandwidth comparison: your implementation vs NCCL.
 
 
 
 ## Phase 5
 src/tree_allreduce.cu + algorithm selector (if you want both)
+
+
+## TODO IN THE Future
+
+- [ ] CUDA streams + events for async pipeline, 让通信和计算同步进行
+（未完成，目前由于设备限制，是每轮step后同步一次）
+- [ ] 4台设备进行之间的通信
