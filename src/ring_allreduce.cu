@@ -136,7 +136,12 @@ void tiny_ring_allreduce_sum_impl(
 }
 //debug
     }
-
+    // 等待所有设备上所有异步拷贝全部完成，再销毁流
+    for (int dev = 0; dev < n_gpus; dev++)
+    {
+        cudaSetDevice(dev);
+        cudaDeviceSynchronize();
+    }
     // Cleanup.
     for (int i = 0; i < n_gpus; i++) {
         cudaSetDevice(i);
