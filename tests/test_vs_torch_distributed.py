@@ -108,15 +108,26 @@ def main() -> int:
                 print(f"  [count={count:>10}] gpu {i}: {status}")
                 print(f"      tiny_vs_cpu_sum: err_cnt={d_local}, match={match_local}")
                 print(f"      tiny_vs_nccl_ref: err_cnt={d_nccl}, match={match_nccl}")
+
                 if d_local > 0:
-                    # 最多打印前10个出错下标
-                    show = bad_idx_local[:10].tolist()
-                    print(f"      -> bad indices (vs cpu sum): {show}{' ...' if len(bad_idx_local)>10 else ''}")
+                    show_idx = bad_idx_local[:10].tolist()
+                    print(f"      -> bad indices (vs cpu sum): {show_idx}{' ...' if len(bad_idx_local)>10 else ''}")
+
+                    # 打印：tiny输出、CPU真值、NCCL真值、差值，只打印出错下标
+                    print("      ===== DUMP BAD REGION =====")
+                    for idx in show_idx:
+                        v_tiny = float(got[idx])
+                        v_cpu = float(local_sum[idx])
+                        v_nccl = float(ref[idx])
+                        delta = v_tiny - v_cpu
+                        print(f"      idx={idx:2d} | tiny={v_tiny:8.4f} | cpu_sum={v_cpu:8.4f} | nccl_ref={v_nccl:8.4f} | delta={delta:8.4f}")
+                    print("      ===========================")
 
             if not ok:
                 all_ok = False
 
         dist.barrier()
+        
     if rank == 0:
         print("PASS: ring allreduce matches NCCL" if all_ok else "FAIL: mismatch detected")
     dist.destroy_process_group()
