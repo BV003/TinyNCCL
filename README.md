@@ -8,6 +8,11 @@ I do this project for learning about NCCL and Distributed system.
 
 2* A5000
 
+connect to terminal
+```
+ssh -i ~/.ssh/vastai_id -p 15598 root@88.183.139.106 -L 8080:localhost:8080    
+```
+
 ## Environment
 
 | Component      | Version         |
