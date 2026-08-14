@@ -8,16 +8,17 @@
 
 // Ring AllReduce = ReduceScatter (N-1 steps) + AllGather (N-1 steps).
 //
-// Async version (Layer 4): each rank owns a dedicated copy stream (DMA) and a
-// compute stream (reduce kernel). cudaEvent expresses the "reduce waits for
-// copy" dependency, so different ranks' copies and reduces can overlap. Steps
-// are separated by cudaDeviceSynchronize to satisfy the cross-rank dependency
-// (rank i's receive in step s needs prev's reduce from step s-1).
+// Each rank owns one dedicated copy stream. The copy and the reduce are issued
+// on the SAME stream so that stream ordering (a hard CUDA guarantee) makes the
+// reduce wait for the copy to finish. An earlier version used a separate
+// compute stream + cudaEvent to express that dependency, but cudaMemcpyPeerAsync
+// completion on this topology was not reliably captured by the event, causing a
+// copy/reduce race (non-deterministic wrong results).
 //
-// NOTE: this does NOT implement single-rank step-to-step overlap via double
-// buffering — that only pays off for N>2 and additionally needs cross-device
-// event sync (limited when P2P is unavailable). See the per-step synchronize
-// comments below.
+// Steps are separated by cudaDeviceSynchronize to satisfy the cross-rank
+// dependency (rank i's receive in step s needs prev's reduce from step s-1).
+// NOTE: this does NOT implement communication/computation overlap via double
+// buffering; that is a separate, later optimization.
 void tiny_ring_allreduce_sum_impl(
     float** send, float** recv, size_t count, int n_gpus)
 {
@@ -28,18 +29,14 @@ void tiny_ring_allreduce_sum_impl(
 
     const size_t chunk = count / static_cast<size_t>(n_gpus);
 
-    // Per-rank async resources.
-    std::vector<cudaStream_t> copy_stream(n_gpus);
-    std::vector<cudaStream_t> compute_stream(n_gpus);
+    // Per-rank async resources: one stream + one temp buffer per device.
+    std::vector<cudaStream_t> stream(n_gpus);
     std::vector<float*> tmp(n_gpus, nullptr);
-    std::vector<cudaEvent_t> copy_event(n_gpus);
 
     for (int i = 0; i < n_gpus; i++) {
         cudaSetDevice(i);
-        cudaStreamCreate(&copy_stream[i]);
-        cudaStreamCreate(&compute_stream[i]);
+        cudaStreamCreate(&stream[i]);
         cudaMalloc(&tmp[i], chunk * sizeof(float));
-        cudaEventCreateWithFlags(&copy_event[i], cudaEventDisableTiming);
     }
 
     // 1. Initialize: recv = send on each device (synchronous).
@@ -51,7 +48,8 @@ void tiny_ring_allreduce_sum_impl(
 
     // 2. ReduceScatter: n_gpus - 1 steps.
     for (int step = 0; step < n_gpus - 1; step++) {
-        // (a) launch all copies on each rank's copy stream.
+        // For each rank: copy neighbor's chunk into tmp, then reduce it into
+        // recv. Both on the same stream so the reduce strictly follows the copy.
         for (int i = 0; i < n_gpus; i++) {
             int next = (i + 1) % n_gpus;
             int idx = (i - step + n_gpus) % n_gpus;
@@ -59,25 +57,14 @@ void tiny_ring_allreduce_sum_impl(
             cudaSetDevice(next);
             transport_copy(tmp[next], next,
                            recv[i] + idx * chunk, i,
-                           chunk * sizeof(float), copy_stream[next]);
-            cudaEventRecord(copy_event[next], copy_stream[next]);
-        }
-
-        // (b) launch all reduces on each rank's compute stream, waiting on
-        //     the corresponding copy.
-        for (int i = 0; i < n_gpus; i++) {
-            int next = (i + 1) % n_gpus;
-            int idx = (i - step + n_gpus) % n_gpus;
-
-            cudaSetDevice(next);
-            cudaStreamWaitEvent(compute_stream[next], copy_event[next], 0);
+                           chunk * sizeof(float), stream[next]);
             tiny_reduce_sum_kernel(recv[next] + idx * chunk,
                                    recv[next] + idx * chunk,
                                    tmp[next],
-                                   static_cast<int>(chunk), compute_stream[next]);
+                                   static_cast<int>(chunk), stream[next]);
         }
 
-        // (c) synchronize all devices before the next step (cross-rank dep).
+        // synchronize all devices before the next step (cross-rank dep).
         for (int i = 0; i < n_gpus; i++) {
             cudaSetDevice(i);
             cudaDeviceSynchronize();
@@ -93,7 +80,7 @@ void tiny_ring_allreduce_sum_impl(
             cudaSetDevice(next);
             transport_copy(recv[next] + idx * chunk, next,
                            recv[i] + idx * chunk, i,
-                           chunk * sizeof(float), copy_stream[next]);
+                           chunk * sizeof(float), stream[next]);
         }
         for (int i = 0; i < n_gpus; i++) {
             cudaSetDevice(i);
@@ -104,9 +91,7 @@ void tiny_ring_allreduce_sum_impl(
     // Cleanup.
     for (int i = 0; i < n_gpus; i++) {
         cudaSetDevice(i);
-        cudaEventDestroy(copy_event[i]);
-        cudaStreamDestroy(copy_stream[i]);
-        cudaStreamDestroy(compute_stream[i]);
+        cudaStreamDestroy(stream[i]);
         cudaFree(tmp[i]);
     }
 }

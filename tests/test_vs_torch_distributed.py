@@ -89,11 +89,13 @@ def main() -> int:
             for i in range(world):
                 got = recv[i].cpu()
                 ref = gather_list[i].cpu()
-                max_err = (got - ref).abs().max().item()
+                diff = (got - ref).abs()
+                max_err = diff.max().item()
+                n_bad = int((diff > 1e-5).sum().item())
                 match = torch.allclose(got, ref, atol=1e-5, rtol=1e-5)
                 ok = ok and match
                 status = "OK " if match else "FAIL"
-                print(f"  [count={count:>10}] gpu {i}: {status}  max_abs_err={max_err:.3e}")
+                print(f"  [count={count:>10}] gpu {i}: {status}  max_abs_err={max_err:.3e}  n_bad={n_bad}")
             if not ok:
                 all_ok = False
 

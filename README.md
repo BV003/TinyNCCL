@@ -38,7 +38,7 @@ pip install -e . --no-build-isolation
 ```bash
 torchrun --nproc_per_node=2 tests/smoke_test.py
 python tests/test_kernels.py
-torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py 不行
-TORCH_DISTRIBUTED_DEBUG=DETAIL torchrun --nproc_per_node=2 tests/ 可以test_vs_torch_distributed.py
+torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py > Logs/test.log 2>&1 不行
+TORCH_DISTRIBUTED_DEBUG=DETAIL torchrun --nproc_per_node=2 tests/ test_vs_torch_distributed.py 可以
 python scripts/benchmark.py   
 ```
