@@ -36,9 +36,11 @@ bool p2p_available(int src_dev, int dst_dev) {
         cudaSetDevice(dst_dev);
         cudaError_t err = cudaDeviceEnablePeerAccess(src_dev, 0);
         bool ok = (err == cudaSuccess || err == cudaErrorPeerAccessAlreadyEnabled);
-        if (!ok) {
-            cudaGetLastError();  // clear sticky error (e.g. cudaErrorPeerAccessUnsupported)
-        }
+        // Always clear the sticky error: when peer access is already enabled
+        // (e.g. NCCL/torch enabled it first), cudaDeviceEnablePeerAccess returns
+        // cudaErrorPeerAccessAlreadyEnabled which is success here but leaks as a
+        // sticky error and blows up at a later unrelated CUDA call.
+        cudaGetLastError();
         g_p2p_supported[src_dev][dst_dev] = ok ? 1 : 2;
         fprintf(stderr, "[transport] P2P %d -> %d: %s\n",
                 src_dev, dst_dev,
