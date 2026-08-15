@@ -223,15 +223,15 @@ void tiny_ring_allreduce_sum_ipc(
 
     // 3. 创建并交换 CUDA IPC events。
     IpcEventSet local_events = ipc_create_events(local_dev);
+    // 必须先 record，再让另一个进程打开并等待这个 init event。
+    log_event_result(cudaEventRecord(local_events.init_ready, stream),
+                     "record init_ready", my_rank, -1,
+                     local_events.init_ready);
     std::vector<IpcEventHandleSet> event_handles = ipc_exchange_event_handles(
         my_rank, world_size, local_events, ipc_dir);
     cudaEvent_t remote_init_ready = ipc_open_event(
         event_handles[1 - my_rank].init_ready_handle, local_dev);
-    cudaEvent_t remote_rs_done = ipc_open_event(
-        event_handles[1 - my_rank].reduce_scatter_done_handle, local_dev);
-    log_event_result(cudaEventRecord(local_events.init_ready, stream),
-                     "record init_ready", my_rank, -1,
-                     local_events.init_ready);
+    cudaEvent_t remote_rs_done = nullptr;
 
     // 4. 交换 IPC handles：每个 rank 暴露独立的 cudaMalloc communication buffer。
     std::vector<IpcHandle> handles = ipc_exchange_handles(
@@ -300,6 +300,19 @@ void tiny_ring_allreduce_sum_ipc(
             printf("\n");
         }
     }
+
+    // reduce_scatter_done 必须在 record 完成之后才交换并打开。
+    // 如果提前打开，另一进程的 cudaStreamWaitEvent 可能只等待一个
+    // 尚未 record 的空 event，并不会等待 Reduce-Scatter。
+    const std::string rs_event_dir = ipc_dir + "/rs_done_events";
+    std::vector<IpcEventHandleSet> rs_event_handles =
+        ipc_exchange_event_handles(my_rank, world_size, local_events,
+                                   rs_event_dir);
+    remote_rs_done = ipc_open_event(
+        rs_event_handles[1 - my_rank].reduce_scatter_done_handle, local_dev);
+    fprintf(stderr,
+            "[IPC EVENT] rank=%d opened post-RS event from rank=%d event=%p\n",
+            my_rank, 1 - my_rank, static_cast<void*>(remote_rs_done));
 
     // 7. All-Gather: world_size - 1 steps
     for (int step = 0; step < world_size - 1; step++) {
