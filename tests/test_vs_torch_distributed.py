@@ -29,7 +29,7 @@ def main() -> int:
     if rank == 0:
         shutil.rmtree(ipc_root, ignore_errors=True)
         os.makedirs(ipc_root, exist_ok=True)
-    dist.barrier()
+    dist.barrier(device_ids=[local_rank])
 
     counts = [8, 16, 32]
     all_ok = True
@@ -40,7 +40,7 @@ def main() -> int:
         ipc_dir = os.path.join(ipc_root, f"count_{count}")
         if rank == 0:
             os.makedirs(ipc_dir, exist_ok=True)
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank])
 
         torch.manual_seed(base_seed + rank)
 
@@ -51,7 +51,7 @@ def main() -> int:
         # 参考值：NCCL all_reduce (SUM)
         ncc_ref = sendbuff.clone()
         dist.all_reduce(ncc_ref, op=dist.ReduceOp.SUM)
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank])
 
         # 我们的 IPC AllReduce
         tiny.tiny_ring_allreduce_sum_ipc(
@@ -60,7 +60,7 @@ def main() -> int:
             ipc_dir
         )
 
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank])
 
         # 对比结果
         err_mask = (recvbuff - ncc_ref).abs() > 1e-5
@@ -76,9 +76,9 @@ def main() -> int:
         else:
             print(f"[count={count:>5}] rank={rank} OK")
 
-        dist.barrier()
+        dist.barrier(device_ids=[local_rank])
 
-    dist.barrier()
+    dist.barrier(device_ids=[local_rank])
 
     # 清理 IPC 目录
     if rank == 0:

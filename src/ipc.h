@@ -37,4 +37,10 @@ std::vector<IpcHandle> ipc_exchange_handles(
     void* my_ptr, size_t my_size, int my_device,
     const std::string& ipc_dir);
 
+// 基于共享文件的进程间 barrier，用于 ring 每一步的跨进程同步。
+void ipc_barrier(
+    int my_rank, int world_size,
+    const std::string& ipc_dir,
+    const std::string& phase, int step);
+
 #endif

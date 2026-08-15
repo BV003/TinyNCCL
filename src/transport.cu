@@ -157,14 +157,33 @@ void transport_copy_ipc(
     void* dst, const void* src,
     size_t nbytes, cudaStream_t stream)
 {
-    fprintf(stderr, "[DBG transport_copy_ipc] dst=%p src=%p nbytes=%zu\n",
-            dst, src, nbytes);
+    int current_device = -1;
+    cudaError_t err = cudaGetDevice(&current_device);
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string("cudaGetDevice (IPC copy) failed: ") +
+                                 cudaGetErrorString(err));
+    }
 
-    cudaError_t err = cudaMemcpyAsync(dst, src, nbytes,
-                                       cudaMemcpyDeviceToDevice, stream);
+    cudaPointerAttributes dst_attr{};
+    cudaPointerAttributes src_attr{};
+    cudaError_t dst_attr_err = cudaPointerGetAttributes(&dst_attr, dst);
+    cudaError_t src_attr_err = cudaPointerGetAttributes(&src_attr, src);
+    fprintf(stderr,
+            "[IPC COPY] current_dev=%d dst=%p dst_dev=%d dst_attr_err=%s "
+            "src=%p src_dev=%d src_attr_err=%s nbytes=%zu\n",
+            current_device, dst,
+            dst_attr_err == cudaSuccess ? dst_attr.device : -1,
+            cudaGetErrorString(dst_attr_err), src,
+            src_attr_err == cudaSuccess ? src_attr.device : -1,
+            cudaGetErrorString(src_attr_err), nbytes);
+
+    // IPC 映射后的 pointer 已经属于当前进程地址空间；这里使用
+    // cudaMemcpyDefault，让 CUDA 根据 UVA pointer attributes 判断方向。
+    err = cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyDefault, stream);
+    fprintf(stderr, "[IPC COPY] submitted err=%s\n", cudaGetErrorString(err));
     if (err != cudaSuccess) {
         throw std::runtime_error(
-            std::string("cudaMemcpyAsync (IPC D2D) failed: ") +
+            std::string("cudaMemcpyAsync (IPC copy) failed: ") +
             cudaGetErrorString(err));
     }
 }

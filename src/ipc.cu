@@ -7,6 +7,28 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+namespace {
+
+bool regular_file_with_size(const std::string& path, size_t expected_size) {
+    struct stat st{};
+    return stat(path.c_str(), &st) == 0 &&
+           S_ISREG(st.st_mode) &&
+           static_cast<size_t>(st.st_size) == expected_size;
+}
+
+void wait_for_file(const std::string& path, size_t expected_size,
+                   const char* what) {
+    constexpr int kMaxRetries = 1000;
+    for (int retry = 0; retry < kMaxRetries; retry++) {
+        if (regular_file_with_size(path, expected_size)) return;
+        usleep(10000);
+    }
+    throw std::runtime_error(std::string("Timeout waiting for complete ") +
+                             what + ": " + path);
+}
+
+}  // namespace
+
 static void check_cuda(cudaError_t err, const char* msg) {
     if (err != cudaSuccess) {
         throw std::runtime_error(
@@ -33,18 +55,26 @@ IpcHandle ipc_create_handle(void* ptr, size_t size, int device) {
 }
 
 void ipc_save_handle(const IpcHandle& handle, const std::string& path) {
-    std::ofstream ofs(path, std::ios::binary);
+    const std::string tmp_path = path + ".tmp." + std::to_string(getpid());
+    std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc);
     if (!ofs) {
-        throw std::runtime_error("Failed to open file for writing: " + path);
+        throw std::runtime_error("Failed to open temporary handle file: " + tmp_path);
     }
     ofs.write(reinterpret_cast<const char*>(&handle), sizeof(IpcHandle));
     if (!ofs) {
-        throw std::runtime_error("Failed to write handle to: " + path);
+        unlink(tmp_path.c_str());
+        throw std::runtime_error("Failed to write handle to: " + tmp_path);
+    }
+    ofs.close();
+    if (rename(tmp_path.c_str(), path.c_str()) != 0) {
+        unlink(tmp_path.c_str());
+        throw std::runtime_error("Failed to publish handle file: " + path);
     }
     fprintf(stderr, "[IPC] saved handle to %s\n", path.c_str());
 }
 
 IpcHandle ipc_load_handle(const std::string& path) {
+    wait_for_file(path, sizeof(IpcHandle), "IPC handle");
     std::ifstream ifs(path, std::ios::binary);
     if (!ifs) {
         throw std::runtime_error("Failed to open file for reading: " + path);
@@ -97,20 +127,10 @@ std::vector<IpcHandle> ipc_exchange_handles(
     std::string my_path = ipc_dir + "/rank_" + std::to_string(my_rank) + ".bin";
     ipc_save_handle(my_handle, my_path);
 
-    // 2. 等待所有 rank 写完（简单轮询）
+    // 2. 等待所有 rank 原子发布完整 handle
     for (int r = 0; r < world_size; r++) {
         std::string path = ipc_dir + "/rank_" + std::to_string(r) + ".bin";
-        int retries = 100;
-        while (retries > 0) {
-            std::ifstream ifs(path, std::ios::binary);
-            if (ifs) break;
-            usleep(10000); // 10ms
-            retries--;
-        }
-        if (retries == 0) {
-            throw std::runtime_error("Timeout waiting for rank " +
-                                     std::to_string(r) + " handle");
-        }
+        wait_for_file(path, sizeof(IpcHandle), "rank IPC handle");
     }
 
     // 3. 读取所有 rank 的 handle
@@ -125,4 +145,36 @@ std::vector<IpcHandle> ipc_exchange_handles(
     }
 
     return handles;
+}
+
+void ipc_barrier(
+    int my_rank, int world_size,
+    const std::string& ipc_dir,
+    const std::string& phase, int step)
+{
+    const std::string prefix = ipc_dir + "/barrier_" + phase + "_" +
+                               std::to_string(step) + "_";
+    const std::string marker = prefix + "rank_" + std::to_string(my_rank);
+    const std::string tmp_marker = marker + ".tmp." + std::to_string(getpid());
+
+    {
+        std::ofstream ofs(tmp_marker, std::ios::binary | std::ios::trunc);
+        if (!ofs) {
+            throw std::runtime_error("Failed to create barrier marker: " + tmp_marker);
+        }
+        ofs << "ready\n";
+    }
+    if (rename(tmp_marker.c_str(), marker.c_str()) != 0) {
+        unlink(tmp_marker.c_str());
+        throw std::runtime_error("Failed to publish barrier marker: " + marker);
+    }
+
+    fprintf(stderr, "[IPC BARRIER] rank=%d phase=%s step=%d published\n",
+            my_rank, phase.c_str(), step);
+    for (int r = 0; r < world_size; r++) {
+        wait_for_file(prefix + "rank_" + std::to_string(r), 6,
+                      "barrier marker");
+    }
+    fprintf(stderr, "[IPC BARRIER] rank=%d phase=%s step=%d released\n",
+            my_rank, phase.c_str(), step);
 }

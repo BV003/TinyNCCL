@@ -8,6 +8,20 @@
 #include "kernels.h"
 #include "ipc.h"
 
+namespace {
+
+void check_cuda_ipc(cudaError_t err, const char* operation,
+                    int rank, const char* phase, int step) {
+    if (err != cudaSuccess) {
+        throw std::runtime_error(
+            std::string("[rank=") + std::to_string(rank) + "] " +
+            phase + " step=" + std::to_string(step) + " " + operation +
+            " failed: " + cudaGetErrorString(err));
+    }
+}
+
+}  // namespace
+
 // ============================================================
 // 单进程多GPU版本（保留用于单进程测试）
 // ============================================================
@@ -166,13 +180,18 @@ void tiny_ring_allreduce_sum_ipc(
 
     // 1. 创建 stream 和临时 buffer
     cudaStream_t stream;
-    cudaStreamCreate(&stream);
+    check_cuda_ipc(cudaStreamCreate(&stream), "cudaStreamCreate",
+                   my_rank, "init", -1);
     float* tmp = nullptr;
-    cudaMalloc(&tmp, chunk_bytes);
+    check_cuda_ipc(cudaMalloc(&tmp, chunk_bytes), "cudaMalloc(tmp)",
+                   my_rank, "init", -1);
 
     // 2. 初始化 recvbuff = sendbuff
-    cudaMemcpy(recvbuff, sendbuff, count * sizeof(float),
-               cudaMemcpyDeviceToDevice);
+    check_cuda_ipc(cudaMemcpy(recvbuff, sendbuff, count * sizeof(float),
+                              cudaMemcpyDeviceToDevice),
+                   "cudaMemcpy(init)", my_rank, "init", -1);
+    check_cuda_ipc(cudaGetLastError(), "cudaGetLastError(init)",
+                   my_rank, "init", -1);
 
     // 3. 交换 IPC handles：每个 rank 把自己的 recvbuff 暴露给其他 rank
     //    这样其他 rank 可以通过 IPC 读取我们的 recvbuff
@@ -211,7 +230,12 @@ void tiny_ring_allreduce_sum_ipc(
             tmp,
             static_cast<int>(chunk), stream);
 
-        cudaStreamSynchronize(stream);
+        check_cuda_ipc(cudaGetLastError(), "kernel launch", my_rank, "RS", step);
+        check_cuda_ipc(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
+                       my_rank, "RS", step);
+        fprintf(stderr, "[IPC RS] rank=%d step=%d received rank=%d chunk=%d\n",
+                my_rank, step, prev, idx);
+        ipc_barrier(my_rank, world_size, ipc_dir, "rs", step);
 
         // debug
         if (world_size == 2 && count == 16) {
@@ -231,10 +255,10 @@ void tiny_ring_allreduce_sum_ipc(
 
     // 6. All-Gather: world_size - 1 steps
     for (int step = 0; step < world_size - 1; step++) {
-        int own_chunk = my_rank;
+        int own_chunk = (my_rank - step + world_size) % world_size;
         int send_dst = (my_rank + 1) % world_size;
 
-        printf("[AG] step=%d rank=%d send own_chunk=%d to rank=%d\n",
+        fprintf(stderr, "[IPC AG] step=%d rank=%d send chunk=%d to rank=%d\n",
                step, my_rank, own_chunk, send_dst);
 
         // 把自己的 chunk 拷贝到 send_dst rank 的 recvbuff
@@ -244,7 +268,9 @@ void tiny_ring_allreduce_sum_ipc(
             recvbuff + own_chunk * chunk,
             chunk_bytes, stream);
 
-        cudaStreamSynchronize(stream);
+        check_cuda_ipc(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
+                       my_rank, "AG", step);
+        ipc_barrier(my_rank, world_size, ipc_dir, "ag", step);
 
         // debug
         if (world_size == 2 && count == 16) {
@@ -263,7 +289,8 @@ void tiny_ring_allreduce_sum_ipc(
     }
 
     // 7. 最终同步
-    cudaStreamSynchronize(stream);
+    check_cuda_ipc(cudaStreamSynchronize(stream), "final cudaStreamSynchronize",
+                   my_rank, "final", -1);
 
     // 8. 关闭远程 IPC handles
     for (int r = 0; r < world_size; r++) {
