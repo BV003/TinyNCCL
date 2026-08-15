@@ -45,6 +45,22 @@ torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py
 ```
 ## Benchmark
 
+```bash
+torchrun --nproc_per_node=2 scripts/benchmark.py
+```
+
+Optional arguments:
+
+```bash
+torchrun --nproc_per_node=2 scripts/benchmark.py \
+  --counts 2048 32768 524288 \
+  --warmup 2 \
+  --iters 10
+```
+
+The benchmark reports end-to-end latency and effective bus bandwidth for the
+TinyNCCL CUDA IPC path and the PyTorch NCCL baseline. TinyNCCL latency includes
+the current per-call IPC handle and event bootstrap overhead.
 
 
 ## Current Implementation
