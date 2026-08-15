@@ -87,6 +87,18 @@ Test environment: one host `iad0`, two NVIDIA L4 GPUs, `--warmup 2 --iters 10`.
   should not be read as a GPU bandwidth comparison. A persistent communicator
   (setup once, reuse many times) is the main next-step optimization.
 
+## Future Improvements
+
+- **Persistent communicator**: exchange IPC handles once and reuse them, removing
+  the ~33 ms per-call bootstrap and making benchmark measure steady-state latency.
+- **Reduce sync overhead**: drop the redundant per-step file barrier once the IPC
+  event path is trusted.
+- **Validate on 4/8 GPUs**: the generalized Ring logic is only tested on 2 GPUs.
+- **Tree AllReduce**: add as a comparison algorithm.
+- **Multi-node transport**: TCP, then InfiniBand/RoCE with GPUDirect RDMA.
+- **Code cleanup**: remove unused `IpcHandle` fields, unused includes, and the
+  per-step unused init event; unify error checks in the single-process path.
+
 
 ## Current Implementation
 

@@ -12,11 +12,20 @@ __pycache__/
 .venv/
 venv/
 
+# pytest
+.pytest_cache/
+
+# Packaging
+dist/
+
 # torch cpp_extension build artifacts
 build/
 *.o
 *.so
+*.dylib
 *.a
+*.dll
+*.pyd
 
 # Benchmark / experiment data
 *.npy
@@ -24,4 +33,15 @@ build/
 *.log
 results/
 
+# Dev server / launcher artifacts
+nohup.out
+*.pid
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS / misc
+.DS_Store
 .bkp
