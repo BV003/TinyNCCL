@@ -62,6 +62,31 @@ The benchmark reports end-to-end latency and effective bus bandwidth for the
 TinyNCCL CUDA IPC path and the PyTorch NCCL baseline. TinyNCCL latency includes
 the current per-call IPC handle and event bootstrap overhead.
 
+### Measured Results
+
+Test environment: one host `iad0`, two NVIDIA L4 GPUs, `--warmup 2 --iters 10`.
+
+| Implementation | count | bytes/rank | latency (ms) | busbw (GB/s) |
+|---------------|-------|-----------|--------------|--------------|
+| Tiny-IPC      |  2048 |   0.01 MB |       33.505 |         0.00 |
+| NCCL          |  2048 |   0.01 MB |        0.080 |         0.10 |
+| Tiny-IPC      | 32768 |   0.13 MB |       33.219 |         0.00 |
+| NCCL          | 32768 |   0.13 MB |        0.079 |         1.65 |
+| Tiny-IPC      |524288 |   2.10 MB |       33.485 |         0.06 |
+| NCCL          |524288 |   2.10 MB |        0.447 |         4.69 |
+
+### Analysis
+
+- Correctness passes for all sizes; results match the NCCL reference.
+- TinyNCCL latency is roughly constant (~33 ms) and dominated by the per-call
+  file-based handle rendezvous and CUDA IPC event exchange, not by the GPU data
+  transfer itself.
+- NCCL uses a persistent process group and a single handshake at startup, so its
+  reported latency is the steady-state collective cost.
+- These numbers are an end-to-end comparison of two different architectures and
+  should not be read as a GPU bandwidth comparison. A persistent communicator
+  (setup once, reuse many times) is the main next-step optimization.
+
 
 ## Current Implementation
 
