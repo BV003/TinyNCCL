@@ -169,6 +169,8 @@ void tiny_ring_allreduce_sum_ipc(
 {
     if (world_size <= 0)
         throw std::runtime_error("world_size must be >= 1");
+    if (world_size != 2)
+        throw std::runtime_error("IPC allreduce currently requires world_size == 2");
     if (count % static_cast<size_t>(world_size) != 0)
         throw std::runtime_error("count must be divisible by world_size");
 
@@ -193,14 +195,25 @@ void tiny_ring_allreduce_sum_ipc(
     check_cuda_ipc(cudaGetLastError(), "cudaGetLastError(init)",
                    my_rank, "init", -1);
 
-    // 3. 交换 IPC handles：每个 rank 把自己的 recvbuff 暴露给其他 rank
+    // 3. 创建并交换 CUDA IPC events。
+    IpcEventSet local_events = ipc_create_events(local_dev);
+    std::vector<IpcEventHandleSet> event_handles = ipc_exchange_event_handles(
+        my_rank, world_size, local_events, ipc_dir);
+    cudaEvent_t remote_init_ready = ipc_open_event(
+        event_handles[1 - my_rank].init_ready_handle, local_dev);
+    cudaEvent_t remote_rs_done = ipc_open_event(
+        event_handles[1 - my_rank].reduce_scatter_done_handle, local_dev);
+    check_cuda_ipc(cudaEventRecord(local_events.init_ready, stream),
+                   "cudaEventRecord(init_ready)", my_rank, "init", -1);
+
+    // 4. 交换 IPC handles：每个 rank 把自己的 recvbuff 暴露给其他 rank
     //    这样其他 rank 可以通过 IPC 读取我们的 recvbuff
     std::vector<IpcHandle> handles = ipc_exchange_handles(
         my_rank, world_size,
         recvbuff, count * sizeof(float), local_dev,
         ipc_dir);
 
-    // 4. 打开所有远程 handles，得到本地可访问的 pointer
+    // 5. 打开所有远程 handles，得到本地可访问的 pointer
     std::vector<float*> remote_ptrs(world_size, nullptr);
     for (int r = 0; r < world_size; r++) {
         if (r == my_rank) {
@@ -211,13 +224,16 @@ void tiny_ring_allreduce_sum_ipc(
         }
     }
 
-    // 5. Reduce-Scatter: world_size - 1 steps
+    // 6. Reduce-Scatter: world_size - 1 steps
     for (int step = 0; step < world_size - 1; step++) {
         int prev = (my_rank - 1 + world_size) % world_size;
         int idx = (my_rank - step + world_size) % world_size;
 
         // 从 prev rank 的 recvbuff 中读取 chunk idx，拷贝到本地 tmp
         // 通过 IPC，remote_ptrs[prev] 是 prev rank 的 recvbuff 的本地映射
+        check_cuda_ipc(cudaStreamWaitEvent(stream, remote_init_ready, 0),
+                       "cudaStreamWaitEvent(init_ready)",
+                       my_rank, "RS", step);
         transport_copy_ipc(
             tmp,
             remote_ptrs[prev] + idx * chunk,
@@ -231,6 +247,9 @@ void tiny_ring_allreduce_sum_ipc(
             static_cast<int>(chunk), stream);
 
         check_cuda_ipc(cudaGetLastError(), "kernel launch", my_rank, "RS", step);
+        check_cuda_ipc(cudaEventRecord(local_events.reduce_scatter_done, stream),
+                       "cudaEventRecord(reduce_scatter_done)",
+                       my_rank, "RS", step);
         check_cuda_ipc(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
                        my_rank, "RS", step);
         fprintf(stderr, "[IPC RS] rank=%d step=%d received rank=%d chunk=%d\n",
@@ -253,7 +272,7 @@ void tiny_ring_allreduce_sum_ipc(
         }
     }
 
-    // 6. All-Gather: world_size - 1 steps
+    // 7. All-Gather: world_size - 1 steps
     for (int step = 0; step < world_size - 1; step++) {
         int prev = (my_rank - 1 + world_size) % world_size;
         int chunk_idx = (my_rank - step - 1 + world_size) % world_size;
@@ -264,6 +283,9 @@ void tiny_ring_allreduce_sum_ipc(
 
         // Pull 模式：从前驱 rank 的 IPC 映射内存读取 chunk，
         // 写入当前 rank 自己的 recvbuff。避免直接写远程进程内存。
+        check_cuda_ipc(cudaStreamWaitEvent(stream, remote_rs_done, 0),
+                       "cudaStreamWaitEvent(reduce_scatter_done)",
+                       my_rank, "AG", step);
         transport_copy_ipc(
             recvbuff + chunk_idx * chunk,
             remote_ptrs[prev] + chunk_idx * chunk,
@@ -289,18 +311,21 @@ void tiny_ring_allreduce_sum_ipc(
         }
     }
 
-    // 7. 最终同步
+    // 8. 最终同步
     check_cuda_ipc(cudaStreamSynchronize(stream), "final cudaStreamSynchronize",
                    my_rank, "final", -1);
 
-    // 8. 关闭远程 IPC handles
+    // 9. 关闭远程 IPC handles 和 events
     for (int r = 0; r < world_size; r++) {
         if (r != my_rank && remote_ptrs[r]) {
             ipc_close_handle(remote_ptrs[r]);
         }
     }
+    ipc_close_event(remote_init_ready);
+    ipc_close_event(remote_rs_done);
+    ipc_destroy_events(local_events);
 
-    // 9. 清理
+    // 10. 清理
     cudaStreamDestroy(stream);
     cudaFree(tmp);
 
