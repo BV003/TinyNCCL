@@ -48,7 +48,7 @@ def main() -> int:
         send = values + rank * 1000.0
         recv = torch.empty_like(send)
 
-        expected = values + 1000.0 * sum(range(world))
+        expected = values * world + 1000.0 * sum(range(world))
         tiny.tiny_ring_allreduce_sum_ipc(rank, world, send, recv, ipc_dir)
         barrier(local_rank)
 
