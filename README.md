@@ -33,15 +33,17 @@ pip install torch --index-url https://download.pytorch.org/whl/cu130
 pip install -e . --no-build-isolation
 ```
 
-## Run Tests and Benchmark
+## Tests 
 
 ```bash
 torchrun --nproc_per_node=2 tests/smoke_test.py
 python tests/test_kernels.py
-torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py > Logs/test.log 2>&1 
-python scripts/benchmark.py   
+python tests/test_transport.py
+python tests/test_single_process.py
+torchrun --nproc_per_node=2 tests/test_fixed_data.py
+torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py 
 ```
-
+## Benchmark
 
 
 
