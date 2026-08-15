@@ -255,17 +255,18 @@ void tiny_ring_allreduce_sum_ipc(
 
     // 6. All-Gather: world_size - 1 steps
     for (int step = 0; step < world_size - 1; step++) {
-        int own_chunk = (my_rank - step + world_size) % world_size;
-        int send_dst = (my_rank + 1) % world_size;
+        int prev = (my_rank - 1 + world_size) % world_size;
+        int chunk_idx = (my_rank - step - 1 + world_size) % world_size;
 
-        fprintf(stderr, "[IPC AG] step=%d rank=%d send chunk=%d to rank=%d\n",
-               step, my_rank, own_chunk, send_dst);
+        fprintf(stderr,
+                "[IPC AG] step=%d rank=%d pull chunk=%d from rank=%d\n",
+                step, my_rank, chunk_idx, prev);
 
-        // 把自己的 chunk 拷贝到 send_dst rank 的 recvbuff
-        // 通过 IPC，remote_ptrs[send_dst] 是 send_dst rank 的 recvbuff 的本地映射
+        // Pull 模式：从前驱 rank 的 IPC 映射内存读取 chunk，
+        // 写入当前 rank 自己的 recvbuff。避免直接写远程进程内存。
         transport_copy_ipc(
-            remote_ptrs[send_dst] + own_chunk * chunk,
-            recvbuff + own_chunk * chunk,
+            recvbuff + chunk_idx * chunk,
+            remote_ptrs[prev] + chunk_idx * chunk,
             chunk_bytes, stream);
 
         check_cuda_ipc(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
