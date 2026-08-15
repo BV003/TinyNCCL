@@ -6,7 +6,7 @@ I do this project for learning about NCCL and Distributed system.
 
 ## Hardware Requirements
 
-2* A5000
+2* A5000,一台机器上
 
 connect to terminal
 ```
