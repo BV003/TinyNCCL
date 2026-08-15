@@ -259,7 +259,9 @@ void tiny_ring_allreduce_sum_ipc(
                          remote_init_ready);
         transport_copy_ipc(
             tmp,
+            local_dev,
             remote_ptrs[prev] + idx * chunk,
+            handles[prev].device,
             chunk_bytes, stream);
 
         // 在本地设备上，把收到的块累加到 recvbuff[idx]
@@ -316,7 +318,9 @@ void tiny_ring_allreduce_sum_ipc(
         // 再进行本地 D2D copy，避免直接把远程 IPC 指针作为最终目标。
         transport_copy_ipc(
             tmp,
+            local_dev,
             remote_ptrs[prev] + chunk_idx * chunk,
+            handles[prev].device,
             chunk_bytes, stream);
 
         check_cuda_ipc(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
