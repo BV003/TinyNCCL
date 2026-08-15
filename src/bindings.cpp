@@ -65,7 +65,7 @@ void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
     tiny_ring_allreduce_sum_impl(send.data(), recv.data(), count, n);
 }
 
-void tiny_ring_allreduce_sum_ipc(
+void ipc_allreduce_wrapper(
     int64_t my_rank, int64_t world_size,
     torch::Tensor sendbuff, torch::Tensor recvbuff,
     std::string ipc_dir)
@@ -95,6 +95,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Copy data between CUDA devices: dst = src");
     m.def("tiny_ring_allreduce_sum", &tiny_ring_allreduce_sum,
           "Ring AllReduce (sum) across GPUs in a single process");
-    m.def("tiny_ring_allreduce_sum_ipc", &tiny_ring_allreduce_sum_ipc,
+    m.def("tiny_ring_allreduce_sum_ipc", &ipc_allreduce_wrapper,
           "Ring AllReduce (sum) across GPUs in multiple processes via CUDA IPC");
 }
