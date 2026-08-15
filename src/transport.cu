@@ -152,3 +152,19 @@ void transport_copy(
     cudaGetDevice(&cur_final);
     fprintf(stderr, "[DBG transport_copy] EXIT restore to old_dev=%d, current_dev=%d\n", old_dev, cur_final);
 }
+
+void transport_copy_ipc(
+    void* dst, const void* src,
+    size_t nbytes, cudaStream_t stream)
+{
+    fprintf(stderr, "[DBG transport_copy_ipc] dst=%p src=%p nbytes=%zu\n",
+            dst, src, nbytes);
+
+    cudaError_t err = cudaMemcpyAsync(dst, src, nbytes,
+                                       cudaMemcpyDeviceToDevice, stream);
+    if (err != cudaSuccess) {
+        throw std::runtime_error(
+            std::string("cudaMemcpyAsync (IPC D2D) failed: ") +
+            cudaGetErrorString(err));
+    }
+}

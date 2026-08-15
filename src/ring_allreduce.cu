@@ -6,6 +6,11 @@
 
 #include "transport.h"
 #include "kernels.h"
+#include "ipc.h"
+
+// ============================================================
+// 单进程多GPU版本（保留用于单进程测试）
+// ============================================================
 
 void tiny_ring_allreduce_sum_impl(
     float** send, float** recv, size_t count, int n_gpus)
@@ -136,4 +141,140 @@ for (int step = 0; step < n_gpus - 1; step++) {
         cudaStreamDestroy(stream[i]);
         cudaFree(tmp[i]);
     }
+}
+
+// ============================================================
+// 多进程 IPC 版本
+// ============================================================
+
+void tiny_ring_allreduce_sum_ipc(
+    int my_rank, int world_size,
+    float* sendbuff, float* recvbuff,
+    size_t count,
+    const std::string& ipc_dir)
+{
+    if (world_size <= 0)
+        throw std::runtime_error("world_size must be >= 1");
+    if (count % static_cast<size_t>(world_size) != 0)
+        throw std::runtime_error("count must be divisible by world_size");
+
+    const size_t chunk = count / static_cast<size_t>(world_size);
+    const size_t chunk_bytes = chunk * sizeof(float);
+
+    int local_dev;
+    cudaGetDevice(&local_dev);
+
+    // 1. 创建 stream 和临时 buffer
+    cudaStream_t stream;
+    cudaStreamCreate(&stream);
+    float* tmp = nullptr;
+    cudaMalloc(&tmp, chunk_bytes);
+
+    // 2. 初始化 recvbuff = sendbuff
+    cudaMemcpy(recvbuff, sendbuff, count * sizeof(float),
+               cudaMemcpyDeviceToDevice);
+
+    // 3. 交换 IPC handles：每个 rank 把自己的 recvbuff 暴露给其他 rank
+    //    这样其他 rank 可以通过 IPC 读取我们的 recvbuff
+    std::vector<IpcHandle> handles = ipc_exchange_handles(
+        my_rank, world_size,
+        recvbuff, count * sizeof(float), local_dev,
+        ipc_dir);
+
+    // 4. 打开所有远程 handles，得到本地可访问的 pointer
+    std::vector<float*> remote_ptrs(world_size, nullptr);
+    for (int r = 0; r < world_size; r++) {
+        if (r == my_rank) {
+            remote_ptrs[r] = recvbuff; // 自己的 buffer 直接用
+        } else {
+            remote_ptrs[r] = static_cast<float*>(
+                ipc_open_handle(handles[r], local_dev));
+        }
+    }
+
+    // 5. Reduce-Scatter: world_size - 1 steps
+    for (int step = 0; step < world_size - 1; step++) {
+        int prev = (my_rank - 1 + world_size) % world_size;
+        int idx = (my_rank - step + world_size) % world_size;
+
+        // 从 prev rank 的 recvbuff 中读取 chunk idx，拷贝到本地 tmp
+        // 通过 IPC，remote_ptrs[prev] 是 prev rank 的 recvbuff 的本地映射
+        transport_copy_ipc(
+            tmp,
+            remote_ptrs[prev] + idx * chunk,
+            chunk_bytes, stream);
+
+        // 在本地设备上，把收到的块累加到 recvbuff[idx]
+        tiny_reduce_sum_kernel(
+            recvbuff + idx * chunk,
+            recvbuff + idx * chunk,
+            tmp,
+            static_cast<int>(chunk), stream);
+
+        cudaStreamSynchronize(stream);
+
+        // debug
+        if (world_size == 2 && count == 16) {
+            std::vector<float> debug(count);
+            cudaMemcpy(debug.data(), recvbuff, count * sizeof(float),
+                       cudaMemcpyDeviceToHost);
+            printf("[DEBUG RS] Rank %d (step=%d)\n", my_rank, step);
+            printf("  chunk0: ");
+            for (int j = 0; j < static_cast<int>(chunk); j++)
+                printf("%.2f ", debug[j]);
+            printf("\n  chunk1: ");
+            for (int j = 0; j < static_cast<int>(chunk); j++)
+                printf("%.2f ", debug[chunk + j]);
+            printf("\n");
+        }
+    }
+
+    // 6. All-Gather: world_size - 1 steps
+    for (int step = 0; step < world_size - 1; step++) {
+        int own_chunk = my_rank;
+        int send_dst = (my_rank + 1) % world_size;
+
+        printf("[AG] step=%d rank=%d send own_chunk=%d to rank=%d\n",
+               step, my_rank, own_chunk, send_dst);
+
+        // 把自己的 chunk 拷贝到 send_dst rank 的 recvbuff
+        // 通过 IPC，remote_ptrs[send_dst] 是 send_dst rank 的 recvbuff 的本地映射
+        transport_copy_ipc(
+            remote_ptrs[send_dst] + own_chunk * chunk,
+            recvbuff + own_chunk * chunk,
+            chunk_bytes, stream);
+
+        cudaStreamSynchronize(stream);
+
+        // debug
+        if (world_size == 2 && count == 16) {
+            std::vector<float> debug(count);
+            cudaMemcpy(debug.data(), recvbuff, count * sizeof(float),
+                       cudaMemcpyDeviceToHost);
+            printf("[DEBUG AG] Rank %d (step=%d)\n", my_rank, step);
+            printf("  chunk0: ");
+            for (int j = 0; j < static_cast<int>(chunk); j++)
+                printf("%.2f ", debug[j]);
+            printf("\n  chunk1: ");
+            for (int j = 0; j < static_cast<int>(chunk); j++)
+                printf("%.2f ", debug[chunk + j]);
+            printf("\n");
+        }
+    }
+
+    // 7. 最终同步
+    cudaStreamSynchronize(stream);
+
+    // 8. 关闭远程 IPC handles
+    for (int r = 0; r < world_size; r++) {
+        if (r != my_rank && remote_ptrs[r]) {
+            ipc_close_handle(remote_ptrs[r]);
+        }
+    }
+
+    // 9. 清理
+    cudaStreamDestroy(stream);
+    cudaFree(tmp);
+
+    printf("[IPC AllReduce] Rank %d done\n", my_rank);
 }

@@ -1,9 +1,11 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <vector>
+#include <string>
 #include "kernels.h"
 #include "transport.h"
 #include "ring_allreduce.h"
+#include "ipc.h"
 
 void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
     TORCH_CHECK(a.sizes().vec() == b.sizes().vec(), "a and b must have same shape");
@@ -63,6 +65,29 @@ void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
     tiny_ring_allreduce_sum_impl(send.data(), recv.data(), count, n);
 }
 
+void tiny_ring_allreduce_sum_ipc(
+    int64_t my_rank, int64_t world_size,
+    torch::Tensor sendbuff, torch::Tensor recvbuff,
+    std::string ipc_dir)
+{
+    TORCH_CHECK(sendbuff.dtype() == torch::kFloat32, "only float32 supported");
+    TORCH_CHECK(recvbuff.dtype() == torch::kFloat32, "only float32 supported");
+    TORCH_CHECK(sendbuff.is_cuda() && recvbuff.is_cuda(), "tensors must be CUDA");
+    TORCH_CHECK(sendbuff.sizes() == recvbuff.sizes(), "sendbuff and recvbuff must have same shape");
+
+    size_t count = sendbuff.numel();
+    TORCH_CHECK(count % static_cast<size_t>(world_size) == 0,
+                "numel must be divisible by world_size");
+
+    tiny_ring_allreduce_sum_ipc(
+        static_cast<int>(my_rank),
+        static_cast<int>(world_size),
+        sendbuff.data_ptr<float>(),
+        recvbuff.data_ptr<float>(),
+        count,
+        ipc_dir);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("tiny_reduce_sum", &tiny_reduce_sum,
           "Element-wise float32 sum: dst = a + b");
@@ -70,4 +95,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Copy data between CUDA devices: dst = src");
     m.def("tiny_ring_allreduce_sum", &tiny_ring_allreduce_sum,
           "Ring AllReduce (sum) across GPUs in a single process");
+    m.def("tiny_ring_allreduce_sum_ipc", &tiny_ring_allreduce_sum_ipc,
+          "Ring AllReduce (sum) across GPUs in multiple processes via CUDA IPC");
 }

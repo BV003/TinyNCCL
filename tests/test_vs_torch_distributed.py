@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+import shutil
 
 import torch
 import torch.distributed as dist
@@ -23,111 +25,57 @@ def main() -> int:
         dist.destroy_process_group()
         return 0
 
+    # 创建共享目录用于 IPC handle 交换
+    ipc_dir = f"/tmp/tinynccl_ipc_{os.getpid()}"
+    if rank == 0:
+        os.makedirs(ipc_dir, exist_ok=True)
+    dist.barrier()
 
-    # Test a few sizes: small, 1M, and a non-power-of-two still divisible by N.
-    counts = [8, 16,32]
-
+    counts = [8, 16, 32]
     all_ok = True
-
     base_seed = 12345
 
     for count in counts:
         torch.manual_seed(base_seed + rank)
 
-        # Each rank's contribution lives on its own GPU.
-        t = torch.randn(count, device=f"cuda:{rank}")
+        # 每个 rank 在自己的 GPU 上创建输入
+        sendbuff = torch.randn(count, device=f"cuda:{local_rank}")
+        recvbuff = torch.empty(count, device=f"cuda:{local_rank}")
 
-        # Reference: NCCL all_reduce (SUM).
-        ncc = t.clone()
-        dist.all_reduce(ncc, op=dist.ReduceOp.SUM)
+        # 参考值：NCCL all_reduce (SUM)
+        ncc_ref = sendbuff.clone()
+        dist.all_reduce(ncc_ref, op=dist.ReduceOp.SUM)
         dist.barrier()
 
-        # Ours: rank 0 reconstructs every rank's input on its GPU and runs the
-        # single-process ring allreduce.
-        if rank == 0:
-            send = []
+        # 我们的 IPC AllReduce
+        tiny.tiny_ring_allreduce_sum_ipc(
+            rank, world,
+            sendbuff, recvbuff,
+            ipc_dir
+        )
 
-            for i in range(world):
-                torch.manual_seed(base_seed + i)
+        dist.barrier()
 
-                send.append(
-                    torch.randn(
-                        count,
-                        device=f"cuda:{i}"
-                    )
-                )
+        # 对比结果
+        err_mask = (recvbuff - ncc_ref).abs() > 1e-5
+        err_cnt = int(err_mask.sum().item())
+        match = torch.allclose(recvbuff, ncc_ref, atol=1e-5, rtol=1e-5)
 
-            recv = [
-                torch.empty(
-                    count,
-                    device=f"cuda:{i}"
-                )
-                for i in range(world)
-            ]
-
-            tiny.tiny_ring_allreduce_sum(send, recv)
-
-        # Gather every rank's NCCL result to rank 0 for comparison.
-        if rank == 0:
-            gather_list = [torch.empty(count, device="cuda:0") for _ in range(world)]
+        if not match:
+            all_ok = False
+            bad_idx = torch.nonzero(err_mask).squeeze(-1)[:5].tolist()
+            print(f"[count={count:>5}] rank={rank} FAIL err_cnt={err_cnt} bad_idx={bad_idx}")
+            for idx in bad_idx:
+                print(f"  idx={idx}: tiny={recvbuff[idx]:.6f} nccl={ncc_ref[idx]:.6f}")
         else:
-            gather_list = None
-        dist.gather(ncc, gather_list=gather_list, dst=0)
-
-        if rank == 0:
-            local_sum = sum(s.cpu() for s in send)
-            ok = True
-
-            # 先校验：CPU求和 和 gather过来的NCCL参考本身是否一致
-            ref0 = gather_list[0].cpu()
-            ref_err = int((local_sum - ref0).abs().gt(1e-5).sum().item())
-            print(f"  [count={count:>10}] CHECK_REF: cpu_sum vs nccl_ref errors = {ref_err}")
-            if ref_err > 0:
-                print("  !!! WARNING: CPU sum and NCCL reference themselves differ! seed/gather problem!")
-
-            for i in range(world):
-                got = recv[i].cpu()
-                ref = gather_list[i].cpu()
-
-                # tiny输出 vs CPU直接求和
-                err_mask_local = (got - local_sum).abs() > 1e-5
-                d_local = int(err_mask_local.sum().item())
-                bad_idx_local = torch.nonzero(err_mask_local).squeeze(-1)
-
-                # tiny输出 vs NCCL参考
-                err_mask_nccl = (got - ref).abs() > 1e-5
-                d_nccl = int(err_mask_nccl.sum().item())
-                bad_idx_nccl = torch.nonzero(err_mask_nccl).squeeze(-1)
-
-                match_local = (d_local == 0)
-                match_nccl = (d_nccl == 0)
-                match = torch.allclose(got, ref, atol=1e-5, rtol=1e-5)
-                ok = ok and match
-
-                status = "OK " if match else "FAIL"
-                print(f"  [count={count:>10}] gpu {i}: {status}")
-                print(f"      tiny_vs_cpu_sum: err_cnt={d_local}, match={match_local}")
-                print(f"      tiny_vs_nccl_ref: err_cnt={d_nccl}, match={match_nccl}")
-
-                if d_local > 0:
-                    show_idx = bad_idx_local[:10].tolist()
-                    print(f"      -> bad indices (vs cpu sum): {show_idx}{' ...' if len(bad_idx_local)>10 else ''}")
-
-                    # 打印：tiny输出、CPU真值、NCCL真值、差值，只打印出错下标
-                    print("      ===== DUMP BAD REGION =====")
-                    for idx in show_idx:
-                        v_tiny = float(got[idx])
-                        v_cpu = float(local_sum[idx])
-                        v_nccl = float(ref[idx])
-                        delta = v_tiny - v_cpu
-                        print(f"      idx={idx:2d} | tiny={v_tiny:8.4f} | cpu_sum={v_cpu:8.4f} | nccl_ref={v_nccl:8.4f} | delta={delta:8.4f}")
-                    print("      ===========================")
-
-            if not ok:
-                all_ok = False
+            print(f"[count={count:>5}] rank={rank} OK")
 
         dist.barrier()
-        
+
+    # 清理 IPC 目录
+    if rank == 0:
+        shutil.rmtree(ipc_dir, ignore_errors=True)
+
     if rank == 0:
         print("PASS: ring allreduce matches NCCL" if all_ok else "FAIL: mismatch detected")
     dist.destroy_process_group()
