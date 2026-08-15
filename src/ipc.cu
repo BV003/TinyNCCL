@@ -49,8 +49,6 @@ IpcHandle ipc_create_handle(void* ptr, size_t size, int device) {
                "cudaIpcGetMemHandle");
     check_cuda(cudaSetDevice(old_dev), "cudaSetDevice restore");
 
-    fprintf(stderr, "[IPC] created handle for dev=%d ptr=%p size=%zu\n",
-            device, ptr, size);
     return handle;
 }
 
@@ -70,7 +68,6 @@ void ipc_save_handle(const IpcHandle& handle, const std::string& path) {
         unlink(tmp_path.c_str());
         throw std::runtime_error("Failed to publish handle file: " + path);
     }
-    fprintf(stderr, "[IPC] saved handle to %s\n", path.c_str());
 }
 
 IpcHandle ipc_load_handle(const std::string& path) {
@@ -84,8 +81,6 @@ IpcHandle ipc_load_handle(const std::string& path) {
     if (!ifs) {
         throw std::runtime_error("Failed to read handle from: " + path);
     }
-    fprintf(stderr, "[IPC] loaded handle from %s (remote dev=%d)\n",
-            path.c_str(), handle.device);
     return handle;
 }
 
@@ -99,8 +94,6 @@ void* ipc_open_handle(const IpcHandle& handle, int local_device) {
                "cudaIpcOpenMemHandle");
     check_cuda(cudaSetDevice(old_dev), "cudaSetDevice restore");
 
-    fprintf(stderr, "[IPC] opened remote handle (dev=%d) -> local ptr=%p on dev=%d\n",
-            handle.device, mapped, local_device);
     return mapped;
 }
 
@@ -163,7 +156,6 @@ void ipc_save_event_handles(const IpcEventSet& events, const std::string& path) 
         unlink(tmp_path.c_str());
         throw std::runtime_error("Failed to publish event file: " + path);
     }
-    fprintf(stderr, "[IPC EVENT] saved handles to %s\n", path.c_str());
 }
 
 IpcEventHandleSet ipc_load_event_handles(const std::string& path) {
@@ -172,8 +164,6 @@ IpcEventHandleSet ipc_load_event_handles(const std::string& path) {
     IpcEventHandleSet handles{};
     ifs.read(reinterpret_cast<char*>(&handles), sizeof(handles));
     if (!ifs) throw std::runtime_error("Failed to read event handles: " + path);
-    fprintf(stderr, "[IPC EVENT] loaded handles from %s (remote dev=%d)\n",
-            path.c_str(), handles.device);
     return handles;
 }
 
@@ -202,21 +192,17 @@ std::vector<IpcHandle> ipc_exchange_handles(
     void* my_ptr, size_t my_size, int my_device,
     const std::string& ipc_dir)
 {
-    // 创建共享目录
     mkdir(ipc_dir.c_str(), 0755);
 
-    // 1. 创建并保存自己的 handle
     IpcHandle my_handle = ipc_create_handle(my_ptr, my_size, my_device);
     std::string my_path = ipc_dir + "/rank_" + std::to_string(my_rank) + ".bin";
     ipc_save_handle(my_handle, my_path);
 
-    // 2. 等待所有 rank 原子发布完整 handle
     for (int r = 0; r < world_size; r++) {
         std::string path = ipc_dir + "/rank_" + std::to_string(r) + ".bin";
         wait_for_file(path, sizeof(IpcHandle), "rank IPC handle");
     }
 
-    // 3. 读取所有 rank 的 handle
     std::vector<IpcHandle> handles(world_size);
     for (int r = 0; r < world_size; r++) {
         if (r == my_rank) {
@@ -272,12 +258,8 @@ void ipc_barrier(
         throw std::runtime_error("Failed to publish barrier marker: " + marker);
     }
 
-    fprintf(stderr, "[IPC BARRIER] rank=%d phase=%s step=%d published\n",
-            my_rank, phase.c_str(), step);
     for (int r = 0; r < world_size; r++) {
         wait_for_file(prefix + "rank_" + std::to_string(r), 6,
                       "barrier marker");
     }
-    fprintf(stderr, "[IPC BARRIER] rank=%d phase=%s step=%d released\n",
-            my_rank, phase.c_str(), step);
 }
