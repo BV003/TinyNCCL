@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import shutil
 
 import torch
@@ -26,9 +25,8 @@ def main() -> int:
         return 0
 
     # 创建共享目录用于 IPC handle 交换
-    ipc_dir = f"/tmp/tinynccl_ipc_{os.getpid()}"
-    if rank == 0:
-        os.makedirs(ipc_dir, exist_ok=True)
+    ipc_dir = "/tmp/tinynccl_ipc_shared"
+    os.makedirs(ipc_dir, exist_ok=True)
     dist.barrier()
 
     counts = [8, 16, 32]
