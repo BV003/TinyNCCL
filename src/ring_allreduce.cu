@@ -20,6 +20,28 @@ void check_cuda_ipc(cudaError_t err, const char* operation,
     }
 }
 
+void log_event_result(cudaError_t err, const char* operation,
+                      int rank, int step, cudaEvent_t event) {
+    fprintf(stderr,
+            "[IPC EVENT] rank=%d step=%d op=%s event=%p result=%s\n",
+            rank, step, operation, static_cast<void*>(event),
+            cudaGetErrorString(err));
+    check_cuda_ipc(err, operation, rank, "EVENT", step);
+}
+
+void dump_chunk(const char* phase, int rank, int step, int chunk_idx,
+                const float* device_ptr, size_t chunk) {
+    std::vector<float> values(chunk);
+    cudaError_t err = cudaMemcpy(values.data(), device_ptr,
+                                 chunk * sizeof(float),
+                                 cudaMemcpyDeviceToHost);
+    check_cuda_ipc(err, "cudaMemcpy(debug chunk)", rank, phase, step);
+    fprintf(stderr, "[IPC DATA] phase=%s rank=%d step=%d chunk=%d:",
+            phase, rank, step, chunk_idx);
+    for (float value : values) fprintf(stderr, " %.6f", value);
+    fprintf(stderr, "\n");
+}
+
 }  // namespace
 
 // ============================================================
@@ -203,8 +225,9 @@ void tiny_ring_allreduce_sum_ipc(
         event_handles[1 - my_rank].init_ready_handle, local_dev);
     cudaEvent_t remote_rs_done = ipc_open_event(
         event_handles[1 - my_rank].reduce_scatter_done_handle, local_dev);
-    check_cuda_ipc(cudaEventRecord(local_events.init_ready, stream),
-                   "cudaEventRecord(init_ready)", my_rank, "init", -1);
+    log_event_result(cudaEventRecord(local_events.init_ready, stream),
+                     "record init_ready", my_rank, -1,
+                     local_events.init_ready);
 
     // 4. 交换 IPC handles：每个 rank 把自己的 recvbuff 暴露给其他 rank
     //    这样其他 rank 可以通过 IPC 读取我们的 recvbuff
@@ -231,9 +254,9 @@ void tiny_ring_allreduce_sum_ipc(
 
         // 从 prev rank 的 recvbuff 中读取 chunk idx，拷贝到本地 tmp
         // 通过 IPC，remote_ptrs[prev] 是 prev rank 的 recvbuff 的本地映射
-        check_cuda_ipc(cudaStreamWaitEvent(stream, remote_init_ready, 0),
-                       "cudaStreamWaitEvent(init_ready)",
-                       my_rank, "RS", step);
+        log_event_result(cudaStreamWaitEvent(stream, remote_init_ready, 0),
+                         "wait init_ready", my_rank, step,
+                         remote_init_ready);
         transport_copy_ipc(
             tmp,
             remote_ptrs[prev] + idx * chunk,
@@ -247,13 +270,15 @@ void tiny_ring_allreduce_sum_ipc(
             static_cast<int>(chunk), stream);
 
         check_cuda_ipc(cudaGetLastError(), "kernel launch", my_rank, "RS", step);
-        check_cuda_ipc(cudaEventRecord(local_events.reduce_scatter_done, stream),
-                       "cudaEventRecord(reduce_scatter_done)",
-                       my_rank, "RS", step);
+        log_event_result(cudaEventRecord(local_events.reduce_scatter_done, stream),
+                         "record reduce_scatter_done", my_rank, step,
+                         local_events.reduce_scatter_done);
         check_cuda_ipc(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
                        my_rank, "RS", step);
         fprintf(stderr, "[IPC RS] rank=%d step=%d received rank=%d chunk=%d\n",
                 my_rank, step, prev, idx);
+        dump_chunk("RS_LOCAL", my_rank, step, idx,
+                   recvbuff + idx * chunk, chunk);
         ipc_barrier(my_rank, world_size, ipc_dir, "rs", step);
 
         // debug
@@ -283,16 +308,25 @@ void tiny_ring_allreduce_sum_ipc(
 
         // Pull 模式：从前驱 rank 的 IPC 映射内存读取 chunk，
         // 写入当前 rank 自己的 recvbuff。避免直接写远程进程内存。
-        check_cuda_ipc(cudaStreamWaitEvent(stream, remote_rs_done, 0),
-                       "cudaStreamWaitEvent(reduce_scatter_done)",
-                       my_rank, "AG", step);
+        log_event_result(cudaStreamWaitEvent(stream, remote_rs_done, 0),
+                         "wait reduce_scatter_done", my_rank, step,
+                         remote_rs_done);
+
+        // 先把远程 chunk 读到本地临时 buffer，便于验证 IPC 读取结果；
+        // 再进行本地 D2D copy，避免直接把远程 IPC 指针作为最终目标。
         transport_copy_ipc(
-            recvbuff + chunk_idx * chunk,
+            tmp,
             remote_ptrs[prev] + chunk_idx * chunk,
             chunk_bytes, stream);
 
         check_cuda_ipc(cudaStreamSynchronize(stream), "cudaStreamSynchronize",
                        my_rank, "AG", step);
+        dump_chunk("AG_REMOTE", my_rank, step, chunk_idx, tmp, chunk);
+        check_cuda_ipc(cudaMemcpy(recvbuff + chunk_idx * chunk, tmp,
+                                  chunk_bytes, cudaMemcpyDeviceToDevice),
+                       "cudaMemcpy(AG local)", my_rank, "AG", step);
+        dump_chunk("AG_LOCAL", my_rank, step, chunk_idx,
+                   recvbuff + chunk_idx * chunk, chunk);
         ipc_barrier(my_rank, world_size, ipc_dir, "ag", step);
 
         // debug
