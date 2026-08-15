@@ -6,7 +6,7 @@ I do this project for learning about NCCL and Distributed system.
 
 ## Hardware Requirements
 
-2* A5000,一台机器上
+2x A5000 on a single machine
 
 connect to terminal
 ```
@@ -102,11 +102,11 @@ Test environment: one host `iad0`, two NVIDIA L4 GPUs, `--warmup 2 --iters 10`.
 
 ## Current Implementation
 
-当前已实现单节点多进程 CUDA IPC Ring AllReduce：
+Currently implemented: single-node, multi-process CUDA IPC Ring AllReduce:
 
-- 每个进程管理一张 GPU
-- 使用 CUDA IPC memory handle 交换通信 buffer
-- 使用 CUDA IPC event 同步 Reduce-Scatter 和 All-Gather
-- 已在一台机器的两张 NVIDIA L4 上通过多尺寸测试
+- Each process manages one GPU
+- Communication buffers are exchanged via CUDA IPC memory handles
+- Reduce-Scatter and All-Gather are synchronized using CUDA IPC events
+- Passed multi-size tests on two NVIDIA L4 GPUs on a single machine
 
-当前不支持跨节点通信。跨节点需要 TCP、InfiniBand、RoCE 或 RDMA transport。
+Cross-node communication is not supported yet. It requires TCP, InfiniBand, RoCE, or RDMA transport.
