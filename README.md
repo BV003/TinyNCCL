@@ -44,9 +44,14 @@ python scripts/benchmark.py
 
 
 
-## Now
 
+## Current Implementation
 
-/Users/michael/Documents/codehome/TinyNCCL/tests/test_fixed_data_two.py
-测试出来是遗留缓冲的问题，是transport_copy的问题，是cudamemcpy不支持跨进程
-NCCL不是这么做的CUDA‑IPC或者RDMA/TCP 网络
+当前已实现单节点多进程 CUDA IPC Ring AllReduce：
+
+- 每个进程管理一张 GPU
+- 使用 CUDA IPC memory handle 交换通信 buffer
+- 使用 CUDA IPC event 同步 Reduce-Scatter 和 All-Gather
+- 已在一台机器的两张 NVIDIA L4 上通过多尺寸测试
+
+当前不支持跨节点通信。跨节点需要 TCP、InfiniBand、RoCE 或 RDMA transport。

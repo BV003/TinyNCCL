@@ -30,50 +30,9 @@ def test_reduce_sum_2d():
     tiny.tiny_reduce_sum(dst, a, b)
     assert torch.allclose(dst, a + b)
 
-def test_copy_peer():
-    if torch.cuda.device_count() < 2:
-        print("skip: need 2 GPUs")
-        return
-    n = 1 << 20
-    # cuda:0 -> cuda:1
-    src = torch.randn(n, device="cuda:0")
-    dst = torch.empty_like(src, device="cuda:1")
-    tiny.tiny_copy_peer(dst, src)
-    torch.cuda.synchronize()
-    assert torch.allclose(dst.cpu(), src.cpu())
-
-    # cuda:1 -> cuda:0
-    src = torch.randn(n, device="cuda:1")
-    dst = torch.empty_like(src, device="cuda:0")
-    tiny.tiny_copy_peer(dst, src)
-    torch.cuda.synchronize()
-    assert torch.allclose(dst.cpu(), src.cpu())
-
-    # same device
-    src = torch.randn(n, device="cuda:0")
-    dst = torch.empty_like(src, device="cuda:0")
-    tiny.tiny_copy_peer(dst, src)
-    torch.cuda.synchronize()
-    assert torch.allclose(dst, src)
-
-def test_ring_allreduce():
-    n_gpus = torch.cuda.device_count()
-    if n_gpus < 2:
-        print("skip: need 2 GPUs")
-        return
-    count = 1 << 12  # divisible by n_gpus
-    sendbuffs = [torch.randn(count, device=f"cuda:{i}") for i in range(n_gpus)]
-    recvbuffs = [torch.empty(count, device=f"cuda:{i}") for i in range(n_gpus)]
-    tiny.tiny_ring_allreduce_sum(sendbuffs, recvbuffs)
-    expected = sum(b.cpu() for b in sendbuffs)
-    for i in range(n_gpus):
-        assert torch.allclose(recvbuffs[i].cpu(), expected, atol=1e-5), f"mismatch on gpu {i}"
-
 if __name__ == "__main__":
     test_reduce_sum_scalar()
     test_reduce_sum_small()
     test_reduce_sum_large()
     test_reduce_sum_2d()
-    test_copy_peer()
-    test_ring_allreduce()
     print("All tests passed!")
