@@ -24,9 +24,11 @@ def main() -> int:
         dist.destroy_process_group()
         return 0
 
-    # 创建共享目录用于 IPC handle 交换
-    ipc_dir = "/tmp/tinynccl_ipc_shared"
-    os.makedirs(ipc_dir, exist_ok=True)
+    # 清理上一次运行遗留的 IPC handle，并创建本次运行的共享目录。
+    ipc_root = "/tmp/tinynccl_ipc_shared"
+    if rank == 0:
+        shutil.rmtree(ipc_root, ignore_errors=True)
+        os.makedirs(ipc_root, exist_ok=True)
     dist.barrier()
 
     counts = [8, 16, 32]
@@ -34,6 +36,12 @@ def main() -> int:
     base_seed = 12345
 
     for count in counts:
+        # 每一轮使用独立目录，避免复用上一轮的 CUDA IPC handle。
+        ipc_dir = os.path.join(ipc_root, f"count_{count}")
+        if rank == 0:
+            os.makedirs(ipc_dir, exist_ok=True)
+        dist.barrier()
+
         torch.manual_seed(base_seed + rank)
 
         # 每个 rank 在自己的 GPU 上创建输入
@@ -70,9 +78,11 @@ def main() -> int:
 
         dist.barrier()
 
+    dist.barrier()
+
     # 清理 IPC 目录
     if rank == 0:
-        shutil.rmtree(ipc_dir, ignore_errors=True)
+        shutil.rmtree(ipc_root, ignore_errors=True)
 
     if rank == 0:
         print("PASS: ring allreduce matches NCCL" if all_ok else "FAIL: mismatch detected")
