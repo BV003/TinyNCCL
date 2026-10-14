@@ -110,3 +110,20 @@ Currently implemented: single-node, multi-process CUDA IPC Ring AllReduce:
 - Passed multi-size tests on two NVIDIA L4 GPUs on a single machine
 
 Cross-node communication is not supported yet. It requires TCP, InfiniBand, RoCE, or RDMA transport.
+
+## Measured Results (H800)
+
+Test environment: one host, two NVIDIA H800 PCIe GPUs (MIG disabled),
+`--warmup 2 --iters 10`.
+
+| Implementation | count | bytes/rank | latency (ms) | busbw (GB/s) |
+|---------------|-------|-----------|--------------|--------------|
+| Tiny-IPC      |  2048 |   0.01 MB |       34.503 |         0.00 |
+| NCCL          |  2048 |   0.01 MB |        0.058 |         0.14 |
+| Tiny-IPC      | 32768 |   0.13 MB |       34.377 |         0.00 |
+| NCCL          | 32768 |   0.13 MB |        0.060 |         2.18 |
+| Tiny-IPC      |524288 |   2.10 MB |       34.082 |         0.06 |
+| NCCL          |524288 |   2.10 MB |        0.172 |        12.21 |
+
+The Tiny-IPC latency (~34 ms) is essentially the same as on the L4 host,
+confirming it is the per-call IPC bootstrap and not the GPU.
