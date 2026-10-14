@@ -18,6 +18,16 @@ void check_cuda_ipc(cudaError_t err, const char* operation,
                    operation + " failed");
 }
 
+// Barrier phases and the directory suffix used to exchange each step's events.
+constexpr char kReduceScatterPhase[] = "rs";
+constexpr char kAllGatherPhase[] = "ag";
+constexpr char kInitEventsSubdir[] = "/init_events";
+
+std::string step_event_dir(const std::string& ipc_dir, const char* phase,
+                           int step) {
+    return ipc_dir + "/" + phase + "_done_step_" + std::to_string(step);
+}
+
 // One multi-process Ring AllReduce over CUDA IPC.
 //
 // Owns every CUDA/IPC resource it acquires so that an exception thrown in any
@@ -115,7 +125,7 @@ void RingSession::setup_init_event() {
                    "record init_ready", my_rank_, "EVENT", -1);
 
     std::vector<IpcEventHandleSet> event_handles = ipc_exchange_event_handles(
-        my_rank_, world_size_, init_events_, ipc_dir_ + "/init_events");
+        my_rank_, world_size_, init_events_, ipc_dir_ + kInitEventsSubdir);
     remote_init_ready_ =
         ipc_open_event(event_handles[prev_].init_ready_handle, local_dev_);
 }
@@ -164,11 +174,11 @@ void RingSession::reduce_scatter() {
                        "record reduce_scatter_done", my_rank_, "EVENT", step);
         check_cuda_ipc(cudaStreamSynchronize(stream_), "cudaStreamSynchronize",
                        my_rank_, "RS", step);
-        ipc_barrier(my_rank_, world_size_, ipc_dir_, "rs", step);
+        ipc_barrier(my_rank_, world_size_, ipc_dir_, kReduceScatterPhase, step);
 
         std::vector<IpcEventHandleSet> rs_handles = ipc_exchange_event_handles(
             my_rank_, world_size_, rs_events_[step],
-            ipc_dir_ + "/rs_done_step_" + std::to_string(step));
+            step_event_dir(ipc_dir_, kReduceScatterPhase, step));
         remote_rs_events_[step] = ipc_open_event(
             rs_handles[prev_].reduce_scatter_done_handle, local_dev_);
     }
@@ -203,11 +213,11 @@ void RingSession::all_gather() {
                        "record all_gather_done", my_rank_, "EVENT", step);
         check_cuda_ipc(cudaStreamSynchronize(stream_),
                        "cudaStreamSynchronize(AG local)", my_rank_, "AG", step);
-        ipc_barrier(my_rank_, world_size_, ipc_dir_, "ag", step);
+        ipc_barrier(my_rank_, world_size_, ipc_dir_, kAllGatherPhase, step);
 
         std::vector<IpcEventHandleSet> ag_handles = ipc_exchange_event_handles(
             my_rank_, world_size_, ag_events_[step],
-            ipc_dir_ + "/ag_done_step_" + std::to_string(step));
+            step_event_dir(ipc_dir_, kAllGatherPhase, step));
         remote_ag_events_[step] = ipc_open_event(
             ag_handles[prev_].reduce_scatter_done_handle, local_dev_);
     }
