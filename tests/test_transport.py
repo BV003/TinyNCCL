@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import torch
+
 import tiny
+from assertions import require
 
 
 def check_copy(src_device: int, dst_device: int, count: int) -> None:
@@ -11,8 +13,9 @@ def check_copy(src_device: int, dst_device: int, count: int) -> None:
     tiny.tiny_copy_peer(dst, src)
     torch.cuda.synchronize(dst_device)
 
-    assert torch.equal(dst.cpu(), src.cpu()), (
-        f"copy mismatch: cuda:{src_device} -> cuda:{dst_device}, count={count}"
+    require(
+        torch.equal(dst.cpu(), src.cpu()),
+        f"copy mismatch: cuda:{src_device} -> cuda:{dst_device}, count={count}",
     )
 
 

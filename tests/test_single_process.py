@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import torch
+
 import tiny
+from assertions import require
 
 
 def run_case(count: int, n_gpus: int) -> None:
@@ -13,8 +15,9 @@ def run_case(count: int, n_gpus: int) -> None:
     tiny.tiny_ring_allreduce_sum(send, recv)
 
     for device, value in enumerate(recv):
-        assert torch.allclose(value.cpu(), expected, atol=1e-5, rtol=1e-5), (
-            f"Ring AllReduce mismatch on GPU {device}, count={count}"
+        require(
+            torch.allclose(value.cpu(), expected, atol=1e-5, rtol=1e-5),
+            f"Ring AllReduce mismatch on GPU {device}, count={count}",
         )
 
 
