@@ -234,6 +234,8 @@ void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
                              std::vector<torch::Tensor> recvbuffs);
 ```
 
+另注册 `RingCommunicator` 类（`.allreduce` / `.world_size` / `.max_count`）。
+
 内部校验辅助（匿名命名空间）：
 
 ```cpp
@@ -294,6 +296,9 @@ run_case(count, n_gpus) -> None
 # 多进程测试（torchrun）
 main() -> int          # test_fixed_data / test_vs_torch_distributed /
                        # test_persistent_communicator / smoke_test
+
+# 一键运行（编译 + 跑全套，< 2 卡自动跳过多进程测试）
+# scripts/run_tests.sh [--no-build]
 ```
 
 ---
@@ -309,8 +314,8 @@ classDiagram
         <<pybind11 module>>
     }
     class RingCommunicator
-    class RingAllReduce {
-        <<module>>
+    class SingleProcessImpl {
+        <<function>>
     }
     class Transport {
         <<module>>
@@ -351,21 +356,20 @@ classDiagram
         <<external>>
     }
 
-    TinyExtension --> RingCommunicator : binds
+    TinyExtension --> RingCommunicator : binds class
     TinyExtension --> Transport : tiny_copy_peer
     TinyExtension --> Kernels : tiny_reduce_sum
-    TinyExtension ..> RingAllReduce : tiny_ring_allreduce_sum (single-process)
+    TinyExtension ..> SingleProcessImpl : tiny_ring_allreduce_sum
 
-    RingCommunicator --> RingAllReduce : allreduce / reduce_scatter / all_gather
     RingCommunicator --> Transport : transport_copy_ipc
     RingCommunicator --> Kernels : tiny_reduce_sum_kernel
     RingCommunicator --> Ipc : exchange / open handles
     RingCommunicator --> MemOps : signal / wait_for
     RingCommunicator --> CudaCheck : check_cuda
 
-    RingAllReduce --> DeviceStreamBuffers : tiny_ring_allreduce_sum_impl owns
-    RingAllReduce --> Transport : transport_copy
-    RingAllReduce --> Kernels : tiny_reduce_sum_kernel
+    SingleProcessImpl --> DeviceStreamBuffers : owns
+    SingleProcessImpl --> Transport : transport_copy
+    SingleProcessImpl --> Kernels : tiny_reduce_sum_kernel
 
     MemOps --> CudaDriver : cudaGetDriverEntryPoint + cuStream*Value32
     Ipc ..> IpcHandle : creates / serializes
@@ -381,9 +385,10 @@ classDiagram
     TopologyScript --> NvidiaSMI : queries
     TopologyScript --> TorchCUDA : probes P2P
 
-    BenchmarkScript ..> TinyExtension : times allreduce / RingCommunicator
+    BenchmarkScript ..> RingCommunicator : times allreduce
     BenchmarkScript ..> TorchCUDA : NCCL baseline (torch.distributed)
     TestHarness ..> TinyExtension : drives tests
+    TestHarness ..> scripts/run_tests.sh : entry point
 ```
 
 ---
