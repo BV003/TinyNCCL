@@ -41,8 +41,10 @@ python tests/test_kernels.py
 python tests/test_transport.py
 python tests/test_single_process.py
 torchrun --nproc_per_node=2 tests/test_fixed_data.py
-torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py 
+torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py
+torchrun --nproc_per_node=2 tests/test_persistent_communicator.py
 ```
+
 ## Benchmark
 
 ```bash
@@ -56,74 +58,68 @@ torchrun --nproc_per_node=2 scripts/benchmark.py \
   --counts 2048 32768 524288 \
   --warmup 2 \
   --iters 10
+
+# use the persistent RingCommunicator instead of the stateless API
+torchrun --nproc_per_node=2 scripts/benchmark.py --persistent
 ```
 
-The benchmark reports end-to-end latency and effective bus bandwidth for the
-TinyNCCL CUDA IPC path and the PyTorch NCCL baseline. TinyNCCL latency includes
-the current per-call IPC handle and event bootstrap overhead.
+Two entry points are exposed:
 
-### Measured Results
+- `tiny.tiny_ring_allreduce_sum_ipc(...)` — stateless, rebuilds the IPC setup on
+  every call.
+- `tiny.RingCommunicator(rank, world, max_count, ipc_dir)` — persistent, sets up
+  once and exposes `allreduce(send, recv)`.
 
-Test environment: one host `iad0`, two NVIDIA L4 GPUs, `--warmup 2 --iters 10`.
-
-| Implementation | count | bytes/rank | latency (ms) | busbw (GB/s) |
-|---------------|-------|-----------|--------------|--------------|
-| Tiny-IPC      |  2048 |   0.01 MB |       33.505 |         0.00 |
-| NCCL          |  2048 |   0.01 MB |        0.080 |         0.10 |
-| Tiny-IPC      | 32768 |   0.13 MB |       33.219 |         0.00 |
-| NCCL          | 32768 |   0.13 MB |        0.079 |         1.65 |
-| Tiny-IPC      |524288 |   2.10 MB |       33.485 |         0.06 |
-| NCCL          |524288 |   2.10 MB |        0.447 |         4.69 |
-
-### Analysis
-
-- Correctness passes for all sizes; results match the NCCL reference.
-- TinyNCCL latency is roughly constant (~33 ms) and dominated by the per-call
-  file-based handle rendezvous and CUDA IPC event exchange, not by the GPU data
-  transfer itself.
-- NCCL uses a persistent process group and a single handshake at startup, so its
-  reported latency is the steady-state collective cost.
-- These numbers are an end-to-end comparison of two different architectures and
-  should not be read as a GPU bandwidth comparison. A persistent communicator
-  (setup once, reuse many times) is the main next-step optimization.
-
-## Future Improvements
-
-- **Persistent communicator**: exchange IPC handles once and reuse them, removing
-  the ~33 ms per-call bootstrap and making benchmark measure steady-state latency.
-- **Reduce sync overhead**: drop the redundant per-step file barrier once the IPC
-  event path is trusted.
-- **Validate on 4/8 GPUs**: the generalized Ring logic is only tested on 2 GPUs.
-- **Tree AllReduce**: add as a comparison algorithm.
-- **Multi-node transport**: TCP, then InfiniBand/RoCE with GPUDirect RDMA.
-- **Code cleanup**: remove unused `IpcHandle` fields, unused includes, and the
-  per-step unused init event; unify error checks in the single-process path.
-
-
-## Current Implementation
-
-Currently implemented: single-node, multi-process CUDA IPC Ring AllReduce:
-
-- Each process manages one GPU
-- Communication buffers are exchanged via CUDA IPC memory handles
-- Reduce-Scatter and All-Gather are synchronized using CUDA IPC events
-- Passed multi-size tests on two NVIDIA L4 GPUs on a single machine
-
-Cross-node communication is not supported yet. It requires TCP, InfiniBand, RoCE, or RDMA transport.
-
-## Measured Results (H800)
+## Measured Results
 
 Test environment: one host, two NVIDIA H800 PCIe GPUs (MIG disabled),
 `--warmup 2 --iters 10`.
 
 | Implementation | count | bytes/rank | latency (ms) | busbw (GB/s) |
 |---------------|-------|-----------|--------------|--------------|
-| Tiny-IPC      |  2048 |   0.01 MB |       34.503 |         0.00 |
-| NCCL          |  2048 |   0.01 MB |        0.058 |         0.14 |
-| Tiny-IPC      | 32768 |   0.13 MB |       34.377 |         0.00 |
-| NCCL          | 32768 |   0.13 MB |        0.060 |         2.18 |
-| Tiny-IPC      |524288 |   2.10 MB |       34.082 |         0.06 |
-| NCCL          |524288 |   2.10 MB |        0.172 |        12.21 |
+| Tiny-Persist  |  2048 |   0.01 MB |        0.064 |         0.13 |
+| NCCL          |  2048 |   0.01 MB |        0.060 |         0.14 |
+| Tiny-Persist  | 32768 |   0.13 MB |        0.078 |         1.67 |
+| NCCL          | 32768 |   0.13 MB |        0.061 |         2.13 |
+| Tiny-Persist  |524288 |   2.10 MB |        0.210 |         9.97 |
+| NCCL          |524288 |   2.10 MB |        0.176 |        11.90 |
 
-The Tiny-IPC latency (~34 ms) is essentially the same as on the L4 host,
-confirming it is the per-call IPC bootstrap and not the GPU.
+`Tiny-Persist` is within ~1.1–1.3x of NCCL across all sizes. For reference, the
+original stateless path measured ~33 ms on two L4 GPUs — constant across sizes,
+i.e. entirely host-side bootstrap overhead, not GPU time.
+
+## Analysis
+
+- The stateless API rebuilds the IPC setup on every call. Profiling showed the
+  cost was dominated by `cudaIpcOpenMemHandle` (~2.35 ms) plus the file-based
+  handle/event rendezvous.
+- `RingCommunicator` sets up the stream, buffers, memory mapping and GPU-side
+  synchronization once. Each `allreduce` then only submits work to the stream.
+- Synchronization uses a per-rank monotonic 32-bit counter in device memory,
+  signalled and waited on in-stream via `cuStreamWriteValue32` /
+  `cuStreamWaitValue32` (resolved with `cudaGetDriverEntryPoint`). The
+  steady-state path touches no files and makes no host round-trips. The same
+  counter doubles as the cross-call barrier that protects the reused buffer.
+
+## Future Improvements
+
+- **Validate on 4/8 GPUs**: the generalized Ring logic is only tested on 2 GPUs.
+- **Vectorize the kernel / tune chunk size**: the reduce kernel is a plain
+  element-wise add.
+- **Use the caller's CUDA stream**: run on the torch current stream to drop the
+  final `cudaStreamSynchronize`.
+- **Tree AllReduce**: add as a comparison algorithm.
+- **Multi-node transport**: TCP, then InfiniBand/RoCE with GPUDirect RDMA.
+
+## Current Implementation
+
+Currently implemented: single-node, multi-process CUDA IPC Ring AllReduce:
+
+- Each process manages one GPU
+- Communication buffers are exchanged via CUDA IPC memory handles (once, by
+  `RingCommunicator`)
+- Reduce-Scatter and All-Gather are synchronized with GPU-side memory counters,
+  driven entirely in-stream
+- A stateless `tiny_ring_allreduce_sum_ipc` wrapper is kept for compatibility
+
+Cross-node communication is not supported yet. It requires TCP, InfiniBand, RoCE, or RDMA transport.
