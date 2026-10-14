@@ -38,14 +38,15 @@ private:
 };
 
 void check_dev_index(int src_dev, int dst_dev) {
-    if (src_dev < 0 || dst_dev < 0 ||
-        src_dev >= kMaxTrackedDevices || dst_dev >= kMaxTrackedDevices) {
+    if (src_dev < 0 || dst_dev < 0 || src_dev >= kMaxTrackedDevices ||
+        dst_dev >= kMaxTrackedDevices) {
         throw std::runtime_error("device index exceeds kMaxTrackedDevices");
     }
 }
 
 bool p2p_available(int src_dev, int dst_dev) {
-    if (src_dev == dst_dev) return true;
+    if (src_dev == dst_dev)
+        return true;
     check_dev_index(src_dev, dst_dev);
 
     if (g_p2p_state[src_dev][dst_dev] == P2pState::kUnknown) {
@@ -63,23 +64,25 @@ bool p2p_available(int src_dev, int dst_dev) {
 }
 
 void* get_staging(int dst_dev, size_t nbytes) {
-    if (nbytes <= g_staging_size[dst_dev]) return g_staging[dst_dev];
+    if (nbytes <= g_staging_size[dst_dev])
+        return g_staging[dst_dev];
 
-    if (g_staging[dst_dev]) cudaFreeHost(g_staging[dst_dev]);
-    const cudaError_t err = cudaHostAlloc(&g_staging[dst_dev], nbytes,
-                                          cudaHostAllocPortable);
+    if (g_staging[dst_dev])
+        cudaFreeHost(g_staging[dst_dev]);
+    const cudaError_t err =
+        cudaHostAlloc(&g_staging[dst_dev], nbytes, cudaHostAllocPortable);
     if (err != cudaSuccess) {
         g_staging[dst_dev] = nullptr;
         g_staging_size[dst_dev] = 0;
-        throw std::runtime_error(
-            std::string("cudaHostAlloc failed: ") + cudaGetErrorString(err));
+        throw std::runtime_error(std::string("cudaHostAlloc failed: ") +
+                                 cudaGetErrorString(err));
     }
     g_staging_size[dst_dev] = nbytes;
     return g_staging[dst_dev];
 }
 
-void copy_via_host(void* dst, int dst_dev, const void* src,
-                   size_t nbytes, cudaStream_t stream) {
+void copy_via_host(void* dst, int dst_dev, const void* src, size_t nbytes,
+                   cudaStream_t stream) {
     void* host = get_staging(dst_dev, nbytes);
     check_cuda(cudaMemcpyAsync(host, src, nbytes, cudaMemcpyDefault, stream),
                "cudaMemcpyAsync D2H failed");
@@ -96,8 +99,8 @@ void transport_copy(void* dst, int dst_dev, const void* src, int src_dev,
 
     cudaError_t err = cudaSuccess;
     if (src_dev == dst_dev) {
-        err = cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyDeviceToDevice,
-                              stream);
+        err =
+            cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyDeviceToDevice, stream);
     } else if (p2p_available(src_dev, dst_dev)) {
         err = cudaMemcpyPeerAsync(dst, dst_dev, src, src_dev, nbytes, stream);
     } else {

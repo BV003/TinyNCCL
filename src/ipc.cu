@@ -17,15 +17,15 @@ constexpr char kBarrierMarker[] = "ready\n";
 
 bool regular_file_with_size(const std::string& path, size_t expected_size) {
     struct stat st{};
-    return stat(path.c_str(), &st) == 0 &&
-           S_ISREG(st.st_mode) &&
+    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode) &&
            static_cast<size_t>(st.st_size) == expected_size;
 }
 
 void wait_for_file(const std::string& path, size_t expected_size,
                    const char* what) {
     for (int retry = 0; retry < kFileWaitMaxRetries; retry++) {
-        if (regular_file_with_size(path, expected_size)) return;
+        if (regular_file_with_size(path, expected_size))
+            return;
         usleep(kFileWaitRetryMicros);
     }
     throw std::runtime_error(std::string("Timeout waiting for complete ") +
@@ -95,7 +95,7 @@ void* ipc_open_handle(const IpcHandle& handle, int local_device) {
     check_cuda(cudaGetDevice(&old_dev), "cudaGetDevice");
     check_cuda(cudaSetDevice(local_device), "cudaSetDevice");
     check_cuda(cudaIpcOpenMemHandle(&mapped, handle.mem_handle,
-                                     cudaIpcMemLazyEnablePeerAccess),
+                                    cudaIpcMemLazyEnablePeerAccess),
                "cudaIpcOpenMemHandle");
     check_cuda(cudaSetDevice(old_dev), "cudaSetDevice restore");
 
@@ -118,17 +118,17 @@ IpcEventSet ipc_create_events(int device) {
     int old_device;
     check_cuda(cudaGetDevice(&old_device), "cudaGetDevice");
     check_cuda(cudaSetDevice(device), "cudaSetDevice");
-    check_cuda(cudaEventCreateWithFlags(
-                   &events.init_ready,
-                   cudaEventDisableTiming | cudaEventInterprocess),
-               "cudaEventCreateWithFlags(init_ready)");
+    check_cuda(
+        cudaEventCreateWithFlags(
+            &events.init_ready, cudaEventDisableTiming | cudaEventInterprocess),
+        "cudaEventCreateWithFlags(init_ready)");
     check_cuda(cudaEventCreateWithFlags(
                    &events.reduce_scatter_done,
                    cudaEventDisableTiming | cudaEventInterprocess),
                "cudaEventCreateWithFlags(reduce_scatter_done)");
-    check_cuda(cudaIpcGetEventHandle(&events.init_ready_handle,
-                                     events.init_ready),
-               "cudaIpcGetEventHandle(init_ready)");
+    check_cuda(
+        cudaIpcGetEventHandle(&events.init_ready_handle, events.init_ready),
+        "cudaIpcGetEventHandle(init_ready)");
     check_cuda(cudaIpcGetEventHandle(&events.reduce_scatter_done_handle,
                                      events.reduce_scatter_done),
                "cudaIpcGetEventHandle(reduce_scatter_done)");
@@ -143,15 +143,19 @@ void ipc_destroy_events(IpcEventSet& events) {
         cudaGetLastError();
         return;
     }
-    if (events.device >= 0) cudaSetDevice(events.device);
-    if (events.init_ready) cudaEventDestroy(events.init_ready);
-    if (events.reduce_scatter_done) cudaEventDestroy(events.reduce_scatter_done);
+    if (events.device >= 0)
+        cudaSetDevice(events.device);
+    if (events.init_ready)
+        cudaEventDestroy(events.init_ready);
+    if (events.reduce_scatter_done)
+        cudaEventDestroy(events.reduce_scatter_done);
     events.init_ready = nullptr;
     events.reduce_scatter_done = nullptr;
     cudaSetDevice(old_device);
 }
 
-void ipc_save_event_handles(const IpcEventSet& events, const std::string& path) {
+void ipc_save_event_handles(const IpcEventSet& events,
+                            const std::string& path) {
     IpcEventHandleSet handles{};
     handles.init_ready_handle = events.init_ready_handle;
     handles.reduce_scatter_done_handle = events.reduce_scatter_done_handle;
@@ -164,16 +168,19 @@ IpcEventHandleSet ipc_load_event_handles(const std::string& path) {
     std::ifstream ifs(path, std::ios::binary);
     IpcEventHandleSet handles{};
     ifs.read(reinterpret_cast<char*>(&handles), sizeof(handles));
-    if (!ifs) throw std::runtime_error("Failed to read event handles: " + path);
+    if (!ifs)
+        throw std::runtime_error("Failed to read event handles: " + path);
     return handles;
 }
 
-cudaEvent_t ipc_open_event(const cudaIpcEventHandle_t& handle, int local_device) {
+cudaEvent_t ipc_open_event(const cudaIpcEventHandle_t& handle,
+                           int local_device) {
     cudaEvent_t event = nullptr;
     int old_device;
     check_cuda(cudaGetDevice(&old_device), "cudaGetDevice");
     check_cuda(cudaSetDevice(local_device), "cudaSetDevice");
-    check_cuda(cudaIpcOpenEventHandle(&event, handle), "cudaIpcOpenEventHandle");
+    check_cuda(cudaIpcOpenEventHandle(&event, handle),
+               "cudaIpcOpenEventHandle");
     check_cuda(cudaSetDevice(old_device), "cudaSetDevice restore");
     return event;
 }
@@ -188,11 +195,10 @@ void ipc_close_event(cudaEvent_t event) {
     }
 }
 
-std::vector<IpcHandle> ipc_exchange_handles(
-    int my_rank, int world_size,
-    void* my_ptr, size_t my_size, int my_device,
-    const std::string& ipc_dir)
-{
+std::vector<IpcHandle> ipc_exchange_handles(int my_rank, int world_size,
+                                            void* my_ptr, size_t my_size,
+                                            int my_device,
+                                            const std::string& ipc_dir) {
     mkdir(ipc_dir.c_str(), 0755);
 
     IpcHandle my_handle = ipc_create_handle(my_ptr, my_size, my_device);
@@ -218,32 +224,27 @@ std::vector<IpcHandle> ipc_exchange_handles(
 }
 
 std::vector<IpcEventHandleSet> ipc_exchange_event_handles(
-    int my_rank, int world_size,
-    const IpcEventSet& local_events,
-    const std::string& ipc_dir)
-{
+    int my_rank, int world_size, const IpcEventSet& local_events,
+    const std::string& ipc_dir) {
     mkdir(ipc_dir.c_str(), 0755);
-    const std::string my_path = ipc_dir + "/events_rank_" +
-                                std::to_string(my_rank) + ".bin";
+    const std::string my_path =
+        ipc_dir + "/events_rank_" + std::to_string(my_rank) + ".bin";
     ipc_save_event_handles(local_events, my_path);
 
     std::vector<IpcEventHandleSet> handles(world_size);
     for (int r = 0; r < world_size; r++) {
-        const std::string path = ipc_dir + "/events_rank_" +
-                                 std::to_string(r) + ".bin";
+        const std::string path =
+            ipc_dir + "/events_rank_" + std::to_string(r) + ".bin";
         wait_for_file(path, sizeof(IpcEventHandleSet), "rank IPC events");
         handles[r] = ipc_load_event_handles(path);
     }
     return handles;
 }
 
-void ipc_barrier(
-    int my_rank, int world_size,
-    const std::string& ipc_dir,
-    const std::string& phase, int step)
-{
-    const std::string prefix = ipc_dir + "/barrier_" + phase + "_" +
-                               std::to_string(step) + "_";
+void ipc_barrier(int my_rank, int world_size, const std::string& ipc_dir,
+                 const std::string& phase, int step) {
+    const std::string prefix =
+        ipc_dir + "/barrier_" + phase + "_" + std::to_string(step) + "_";
     const std::string marker = prefix + "rank_" + std::to_string(my_rank);
     atomic_write(marker, kBarrierMarker, sizeof(kBarrierMarker) - 1);
 

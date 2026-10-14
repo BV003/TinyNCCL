@@ -26,8 +26,7 @@ void require_cuda(const torch::Tensor& tensor, const char* name) {
 }
 
 void require_divisible(size_t count, size_t divisor, const char* name) {
-    TORCH_CHECK(count % divisor == 0,
-                name, " must be divisible by ", divisor);
+    TORCH_CHECK(count % divisor == 0, name, " must be divisible by ", divisor);
 }
 
 }  // namespace
@@ -38,11 +37,8 @@ void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
     dst.resize_(a.sizes());  // output shape follows the inputs
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
     int n = a.numel();
-    tiny_reduce_sum_kernel(
-        dst.data_ptr<float>(),
-        a.data_ptr<float>(),
-        b.data_ptr<float>(),
-        n, stream);
+    tiny_reduce_sum_kernel(dst.data_ptr<float>(), a.data_ptr<float>(),
+                           b.data_ptr<float>(), n, stream);
 }
 
 void tiny_copy_peer(torch::Tensor dst, torch::Tensor src) {
@@ -53,13 +49,8 @@ void tiny_copy_peer(torch::Tensor dst, torch::Tensor src) {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
     int src_dev = src.get_device();
     int dst_dev = dst.get_device();
-    transport_copy(
-        dst.data_ptr(),
-        dst_dev,
-        src.data_ptr(),
-        src_dev,
-        src.numel() * src.element_size(),
-        stream);
+    transport_copy(dst.data_ptr(), dst_dev, src.data_ptr(), src_dev,
+                   src.numel() * src.element_size(), stream);
 }
 
 void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
@@ -91,11 +82,9 @@ void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
     tiny_ring_allreduce_sum_impl(send.data(), recv.data(), count, n);
 }
 
-void ipc_allreduce_wrapper(
-    int64_t my_rank, int64_t world_size,
-    torch::Tensor sendbuff, torch::Tensor recvbuff,
-    std::string ipc_dir)
-{
+void ipc_allreduce_wrapper(int64_t my_rank, int64_t world_size,
+                           torch::Tensor sendbuff, torch::Tensor recvbuff,
+                           std::string ipc_dir) {
     require_float32(sendbuff, "sendbuff");
     require_float32(recvbuff, "recvbuff");
     require_cuda(sendbuff, "sendbuff");
@@ -107,12 +96,8 @@ void ipc_allreduce_wrapper(
     require_divisible(count, static_cast<size_t>(world_size), "numel");
 
     tiny_ring_allreduce_sum_ipc(
-        static_cast<int>(my_rank),
-        static_cast<int>(world_size),
-        sendbuff.data_ptr<float>(),
-        recvbuff.data_ptr<float>(),
-        count,
-        ipc_dir);
+        static_cast<int>(my_rank), static_cast<int>(world_size),
+        sendbuff.data_ptr<float>(), recvbuff.data_ptr<float>(), count, ipc_dir);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -122,6 +107,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Copy data between CUDA devices: dst = src");
     m.def("tiny_ring_allreduce_sum", &tiny_ring_allreduce_sum,
           "Ring AllReduce (sum) across GPUs in a single process");
-    m.def("tiny_ring_allreduce_sum_ipc", &ipc_allreduce_wrapper,
-          "Ring AllReduce (sum) across GPUs in multiple processes via CUDA IPC");
+    m.def(
+        "tiny_ring_allreduce_sum_ipc", &ipc_allreduce_wrapper,
+        "Ring AllReduce (sum) across GPUs in multiple processes via CUDA IPC");
 }
