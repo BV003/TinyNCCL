@@ -36,7 +36,8 @@ pip install -e . --no-build-isolation
 ## Tests 
 
 Run the whole suite (builds first, then runs every test that fits this
-machine — multi-process tests are skipped when fewer than 2 GPUs are visible):
+machine — multi-process tests run with one rank per visible GPU, or `NPROC=N`,
+and are skipped when fewer than 2 GPUs are visible):
 
 ```bash
 scripts/run_tests.sh              # add --no-build to skip the re-install
@@ -52,6 +53,7 @@ PYTHON=/path/to/venv/bin/python scripts/run_tests.sh
 Or run them individually:
 
 ```bash
+c++ -std=c++17 -O2 -Isrc tests/test_ring_schedule.cpp -o /tmp/ring_schedule && /tmp/ring_schedule
 torchrun --nproc_per_node=2 tests/smoke_test.py
 python tests/test_kernels.py
 python tests/test_transport.py
@@ -60,6 +62,11 @@ torchrun --nproc_per_node=2 tests/test_fixed_data.py
 torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py
 torchrun --nproc_per_node=2 tests/test_persistent_communicator.py
 ```
+
+`tests/test_ring_schedule.cpp` needs no GPU: it runs the real chunk-index and
+signal math from `src/ring_schedule.h` for 1–8 ranks under random interleavings
+of the GPU-side dependencies. The multi-process tests work for any
+`--nproc_per_node`.
 
 ## Benchmark
 
@@ -115,7 +122,10 @@ across sizes, i.e. entirely host-side overhead, not GPU time.
 
 ## Future Improvements
 
-- **Validate on 4/8 GPUs**: the generalized Ring logic is only tested on 2 GPUs.
+- **Validate on 4/8 GPUs**: the ring schedule for n > 2 is checked by the CPU
+  simulation in `tests/test_ring_schedule.cpp` (an all-gather indexing bug that
+  only appeared with 3+ ranks was fixed this way), but has not yet been run on
+  real hardware with more than 2 GPUs.
 - **Vectorize the kernel / tune chunk size**: the reduce kernel is a plain
   element-wise add.
 - **Use the caller's CUDA stream**: run on the torch current stream to drop the

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ipc.h"
+#include "ring_schedule.h"
 
 // Single-process, multi-GPU variant (kept for the single-process test).
 void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
@@ -49,7 +50,9 @@ private:
     void wait_for(int rank, uint32_t value, const char* what);
     void teardown();
 
-    int signals_per_call() const { return 1 + 2 * steps_; }
+    int signals_per_call() const {
+        return tinynccl::ring::signals_per_call(steps_);
+    }
 
     const int my_rank_;
     const int world_size_;

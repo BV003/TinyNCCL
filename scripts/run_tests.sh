@@ -11,8 +11,9 @@
 #   PYTHON=/path/to/venv/bin/python scripts/run_tests.sh
 # torchrun defaults to a sibling of PYTHON when present, else the one on PATH.
 #
-# Multi-process tests need two GPUs with peer access (CUDA IPC); they are skipped
-# when fewer are visible, so single-GPU machines still get the rest.
+# Multi-process tests need at least two GPUs with peer access (CUDA IPC) and run
+# with one rank per visible GPU; they are skipped when fewer are visible, so
+# single-GPU machines still get the rest. The ring schedule test needs no GPU.
 set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -101,15 +102,29 @@ run() {
     fi
 }
 
+# CPU-only: the ring schedule (chunk indices + GPU signal dependencies) for
+# 1..8 ranks under random interleavings. Needs only a host C++ compiler.
+CXX="${CXX:-c++}"
+if command -v "$CXX" >/dev/null 2>&1; then
+    run schedule sh -c "\"$CXX\" -std=c++17 -O2 -Isrc tests/test_ring_schedule.cpp \
+        -o /tmp/tinynccl_ring_schedule && /tmp/tinynccl_ring_schedule"
+else
+    echo "SKIP  schedule (no C++ compiler; set CXX)"
+fi
+
 run kernels "$PYTHON" tests/test_kernels.py
 run transport "$PYTHON" tests/test_transport.py
 run single "$PYTHON" tests/test_single_process.py
 
-if [ "$gpu_count" -ge 2 ]; then
-    run smoke timeout 180 "$TORCHRUN" --nproc_per_node=2 tests/smoke_test.py
-    run fixed_data timeout 300 "$TORCHRUN" --nproc_per_node=2 tests/test_fixed_data.py
-    run vs_nccl timeout 300 "$TORCHRUN" --nproc_per_node=2 tests/test_vs_torch_distributed.py
-    run persistent timeout 300 "$TORCHRUN" --nproc_per_node=2 tests/test_persistent_communicator.py
+# Multi-process tests use every visible GPU (override with NPROC=N), so 4- and
+# 8-GPU machines exercise the ring with more than two ranks.
+NPROC="${NPROC:-$gpu_count}"
+if [ "$NPROC" -ge 2 ]; then
+    echo "### multi-process tests with $NPROC ranks"
+    run smoke timeout 180 "$TORCHRUN" --nproc_per_node="$NPROC" tests/smoke_test.py
+    run fixed_data timeout 300 "$TORCHRUN" --nproc_per_node="$NPROC" tests/test_fixed_data.py
+    run vs_nccl timeout 300 "$TORCHRUN" --nproc_per_node="$NPROC" tests/test_vs_torch_distributed.py
+    run persistent timeout 300 "$TORCHRUN" --nproc_per_node="$NPROC" tests/test_persistent_communicator.py
 else
     echo "SKIP  multi-process tests (need >= 2 GPUs, found ${gpu_count})"
 fi
