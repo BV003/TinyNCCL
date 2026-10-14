@@ -16,15 +16,17 @@ struct IpcHandle {
 
 struct IpcEventSet {
     cudaEvent_t init_ready = nullptr;
-    cudaEvent_t reduce_scatter_done = nullptr;
+    // Recorded when a Ring step finishes; reused by reduce-scatter and
+    // all-gather (each step publishes its own set).
+    cudaEvent_t step_done = nullptr;
     cudaIpcEventHandle_t init_ready_handle{};
-    cudaIpcEventHandle_t reduce_scatter_done_handle{};
+    cudaIpcEventHandle_t step_done_handle{};
     int device = -1;
 };
 
 struct IpcEventHandleSet {
     cudaIpcEventHandle_t init_ready_handle{};
-    cudaIpcEventHandle_t reduce_scatter_done_handle{};
+    cudaIpcEventHandle_t step_done_handle{};
     int device = -1;
 };
 

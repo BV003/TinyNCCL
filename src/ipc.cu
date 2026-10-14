@@ -122,16 +122,16 @@ IpcEventSet ipc_create_events(int device) {
         cudaEventCreateWithFlags(
             &events.init_ready, cudaEventDisableTiming | cudaEventInterprocess),
         "cudaEventCreateWithFlags(init_ready)");
-    check_cuda(cudaEventCreateWithFlags(
-                   &events.reduce_scatter_done,
-                   cudaEventDisableTiming | cudaEventInterprocess),
-               "cudaEventCreateWithFlags(reduce_scatter_done)");
+    check_cuda(
+        cudaEventCreateWithFlags(
+            &events.step_done, cudaEventDisableTiming | cudaEventInterprocess),
+        "cudaEventCreateWithFlags(step_done)");
     check_cuda(
         cudaIpcGetEventHandle(&events.init_ready_handle, events.init_ready),
         "cudaIpcGetEventHandle(init_ready)");
-    check_cuda(cudaIpcGetEventHandle(&events.reduce_scatter_done_handle,
-                                     events.reduce_scatter_done),
-               "cudaIpcGetEventHandle(reduce_scatter_done)");
+    check_cuda(
+        cudaIpcGetEventHandle(&events.step_done_handle, events.step_done),
+        "cudaIpcGetEventHandle(step_done)");
     check_cuda(cudaSetDevice(old_device), "cudaSetDevice restore");
     return events;
 }
@@ -147,10 +147,10 @@ void ipc_destroy_events(IpcEventSet& events) {
         cudaSetDevice(events.device);
     if (events.init_ready)
         cudaEventDestroy(events.init_ready);
-    if (events.reduce_scatter_done)
-        cudaEventDestroy(events.reduce_scatter_done);
+    if (events.step_done)
+        cudaEventDestroy(events.step_done);
     events.init_ready = nullptr;
-    events.reduce_scatter_done = nullptr;
+    events.step_done = nullptr;
     cudaSetDevice(old_device);
 }
 
@@ -158,7 +158,7 @@ void ipc_save_event_handles(const IpcEventSet& events,
                             const std::string& path) {
     IpcEventHandleSet handles{};
     handles.init_ready_handle = events.init_ready_handle;
-    handles.reduce_scatter_done_handle = events.reduce_scatter_done_handle;
+    handles.step_done_handle = events.step_done_handle;
     handles.device = events.device;
     atomic_write(path, &handles, sizeof(handles));
 }

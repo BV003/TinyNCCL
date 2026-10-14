@@ -163,9 +163,8 @@ void RingSession::reduce_scatter() {
                        step);
 
         rs_events_[step] = ipc_create_events(local_dev_);
-        check_cuda_ipc(
-            cudaEventRecord(rs_events_[step].reduce_scatter_done, stream_),
-            "record reduce_scatter_done", my_rank_, "EVENT", step);
+        check_cuda_ipc(cudaEventRecord(rs_events_[step].step_done, stream_),
+                       "record reduce_scatter_done", my_rank_, "EVENT", step);
         check_cuda_ipc(cudaStreamSynchronize(stream_), "cudaStreamSynchronize",
                        my_rank_, "RS", step);
         ipc_barrier(my_rank_, world_size_, ipc_dir_, kReduceScatterPhase, step);
@@ -173,8 +172,8 @@ void RingSession::reduce_scatter() {
         std::vector<IpcEventHandleSet> rs_handles = ipc_exchange_event_handles(
             my_rank_, world_size_, rs_events_[step],
             step_event_dir(ipc_dir_, kReduceScatterPhase, step));
-        remote_rs_events_[step] = ipc_open_event(
-            rs_handles[prev_].reduce_scatter_done_handle, local_dev_);
+        remote_rs_events_[step] =
+            ipc_open_event(rs_handles[prev_].step_done_handle, local_dev_);
     }
 }
 
@@ -201,9 +200,8 @@ void RingSession::all_gather() {
                        "cudaMemcpy(AG local)", my_rank_, "AG", step);
 
         ag_events_[step] = ipc_create_events(local_dev_);
-        check_cuda_ipc(
-            cudaEventRecord(ag_events_[step].reduce_scatter_done, stream_),
-            "record all_gather_done", my_rank_, "EVENT", step);
+        check_cuda_ipc(cudaEventRecord(ag_events_[step].step_done, stream_),
+                       "record all_gather_done", my_rank_, "EVENT", step);
         check_cuda_ipc(cudaStreamSynchronize(stream_),
                        "cudaStreamSynchronize(AG local)", my_rank_, "AG", step);
         ipc_barrier(my_rank_, world_size_, ipc_dir_, kAllGatherPhase, step);
@@ -211,8 +209,8 @@ void RingSession::all_gather() {
         std::vector<IpcEventHandleSet> ag_handles = ipc_exchange_event_handles(
             my_rank_, world_size_, ag_events_[step],
             step_event_dir(ipc_dir_, kAllGatherPhase, step));
-        remote_ag_events_[step] = ipc_open_event(
-            ag_handles[prev_].reduce_scatter_done_handle, local_dev_);
+        remote_ag_events_[step] =
+            ipc_open_event(ag_handles[prev_].step_done_handle, local_dev_);
     }
 }
 
