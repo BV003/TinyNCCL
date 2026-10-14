@@ -42,6 +42,13 @@ machine — multi-process tests are skipped when fewer than 2 GPUs are visible):
 scripts/run_tests.sh              # add --no-build to skip the re-install
 ```
 
+If the environment that has torch is not the default interpreter, point the
+script at it (torchrun is picked up from the same directory):
+
+```bash
+PYTHON=/path/to/venv/bin/python scripts/run_tests.sh
+```
+
 Or run them individually:
 
 ```bash
