@@ -14,22 +14,6 @@ struct IpcHandle {
     int device;      // 该 buffer 所在的 GPU device
 };
 
-struct IpcEventSet {
-    cudaEvent_t init_ready = nullptr;
-    // Recorded when a Ring step finishes; reused by reduce-scatter and
-    // all-gather (each step publishes its own set).
-    cudaEvent_t step_done = nullptr;
-    cudaIpcEventHandle_t init_ready_handle{};
-    cudaIpcEventHandle_t step_done_handle{};
-    int device = -1;
-};
-
-struct IpcEventHandleSet {
-    cudaIpcEventHandle_t init_ready_handle{};
-    cudaIpcEventHandle_t step_done_handle{};
-    int device = -1;
-};
-
 // 将当前 rank 的 buffer 创建 IPC handle
 IpcHandle ipc_create_handle(void* ptr, size_t size, int device);
 
@@ -45,18 +29,6 @@ void* ipc_open_handle(const IpcHandle& handle, int local_device);
 // 关闭已打开的 IPC handle
 void ipc_close_handle(void* mapped_ptr);
 
-IpcEventSet ipc_create_events(int device);
-void ipc_destroy_events(IpcEventSet& events);
-void ipc_save_event_handles(const IpcEventSet& events, const std::string& path);
-IpcEventHandleSet ipc_load_event_handles(const std::string& path);
-cudaEvent_t ipc_open_event(const cudaIpcEventHandle_t& handle,
-                           int local_device);
-void ipc_close_event(cudaEvent_t event);
-
-std::vector<IpcEventHandleSet> ipc_exchange_event_handles(
-    int my_rank, int world_size, const IpcEventSet& local_events,
-    const std::string& ipc_dir);
-
 // 批量交换 handles：每个 rank 把自己的 handle 写到共享目录，然后读取所有其他
 // rank 的 rank_dir: 例如 "/tmp/tinynccl_ipc" 返回: vector of IpcHandle，按 rank
 // 索引排序
@@ -64,9 +36,5 @@ std::vector<IpcHandle> ipc_exchange_handles(int my_rank, int world_size,
                                             void* my_ptr, size_t my_size,
                                             int my_device,
                                             const std::string& ipc_dir);
-
-// 基于共享文件的进程间 barrier，用于 ring 每一步的跨进程同步。
-void ipc_barrier(int my_rank, int world_size, const std::string& ipc_dir,
-                 const std::string& phase, int step);
 
 #endif
