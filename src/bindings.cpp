@@ -29,6 +29,19 @@ void require_divisible(size_t count, size_t divisor, const char* name) {
     TORCH_CHECK(count % divisor == 0, name, " must be divisible by ", divisor);
 }
 
+// Shared checks for the two multi-process allreduce entry points.
+void require_allreduce_inputs(const torch::Tensor& sendbuff,
+                              const torch::Tensor& recvbuff,
+                              size_t world_size) {
+    require_float32(sendbuff, "sendbuff");
+    require_float32(recvbuff, "recvbuff");
+    require_cuda(sendbuff, "sendbuff");
+    require_cuda(recvbuff, "recvbuff");
+    require_same_shape(sendbuff, recvbuff,
+                       "sendbuff and recvbuff must have same shape");
+    require_divisible(sendbuff.numel(), world_size, "numel");
+}
+
 }  // namespace
 
 void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
@@ -36,7 +49,7 @@ void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
     require_float32(a, "a");
     dst.resize_(a.sizes());  // output shape follows the inputs
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
-    int n = a.numel();
+    const std::size_t n = static_cast<std::size_t>(a.numel());
     tiny_reduce_sum_kernel(dst.data_ptr<float>(), a.data_ptr<float>(),
                            b.data_ptr<float>(), n, stream);
 }
@@ -85,16 +98,10 @@ void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
 void ipc_allreduce_wrapper(int64_t my_rank, int64_t world_size,
                            torch::Tensor sendbuff, torch::Tensor recvbuff,
                            std::string ipc_dir) {
-    require_float32(sendbuff, "sendbuff");
-    require_float32(recvbuff, "recvbuff");
-    require_cuda(sendbuff, "sendbuff");
-    require_cuda(recvbuff, "recvbuff");
-    require_same_shape(sendbuff, recvbuff,
-                       "sendbuff and recvbuff must have same shape");
+    require_allreduce_inputs(sendbuff, recvbuff,
+                             static_cast<size_t>(world_size));
 
     const size_t count = sendbuff.numel();
-    require_divisible(count, static_cast<size_t>(world_size), "numel");
-
     tiny_ring_allreduce_sum_ipc(
         static_cast<int>(my_rank), static_cast<int>(world_size),
         sendbuff.data_ptr<float>(), recvbuff.data_ptr<float>(), count, ipc_dir);
@@ -121,16 +128,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             "allreduce",
             [](RingCommunicator& self, torch::Tensor sendbuff,
                torch::Tensor recvbuff) {
-                require_float32(sendbuff, "sendbuff");
-                require_float32(recvbuff, "recvbuff");
-                require_cuda(sendbuff, "sendbuff");
-                require_cuda(recvbuff, "recvbuff");
-                require_same_shape(sendbuff, recvbuff,
-                                   "sendbuff and recvbuff must have same "
-                                   "shape");
+                require_allreduce_inputs(
+                    sendbuff, recvbuff, static_cast<size_t>(self.world_size()));
                 const size_t count = sendbuff.numel();
-                require_divisible(count, static_cast<size_t>(self.world_size()),
-                                  "numel");
                 TORCH_CHECK(count <= self.max_count(),
                             "count exceeds communicator max_count");
                 self.allreduce(sendbuff.data_ptr<float>(),

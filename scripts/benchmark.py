@@ -57,6 +57,21 @@ def check_result(result: torch.Tensor, reference: torch.Tensor) -> bool:
     return bool(flag.item())
 
 
+def _time(run_once, warmup: int, iters: int, local_rank: int) -> float:
+    """Warm up, then return the mean seconds per ``run_once()`` call."""
+    for _ in range(warmup):
+        run_once()
+    torch.cuda.synchronize(local_rank)
+    barrier(local_rank)
+
+    start = time.perf_counter()
+    for _ in range(iters):
+        run_once()
+    torch.cuda.synchronize(local_rank)
+    barrier(local_rank)
+    return (time.perf_counter() - start) / iters
+
+
 def run_tiny(
     send: torch.Tensor,
     rank: int,
@@ -66,38 +81,27 @@ def run_tiny(
     warmup: int,
     iters: int,
 ) -> tuple[float, torch.Tensor]:
-    count = send.numel()
     recv = torch.empty_like(send)
 
+    warmup_dirs = [root / f"tiny_warmup_{i}" for i in range(warmup)]
+    iter_dirs = [root / f"tiny_iter_{i}" for i in range(iters)]
     if rank == 0:
-        for prefix, rounds in (("tiny_warmup", warmup), ("tiny_iter", iters)):
-            for iteration in range(rounds):
-                (root / f"{prefix}_{iteration}").mkdir(
-                    parents=True, exist_ok=True
-                )
+        for directory in warmup_dirs + iter_dirs:
+            directory.mkdir(parents=True, exist_ok=True)
     barrier(local_rank)
 
-    for iteration in range(warmup):
-        ipc_dir = root / f"tiny_warmup_{iteration}"
-        tiny.tiny_ring_allreduce_sum_ipc(
-            rank, world, send, recv, str(ipc_dir)
-        )
+    call = {"n": 0}
 
-    torch.cuda.synchronize(local_rank)
-    barrier(local_rank)
-    start = time.perf_counter()
+    def run_once() -> None:
+        # The stateless API bootstraps IPC handles on every invocation and
+        # needs a fresh shared directory for each one.
+        i = call["n"]
+        call["n"] += 1
+        directory = warmup_dirs[i] if i < warmup else iter_dirs[i - warmup]
+        tiny.tiny_ring_allreduce_sum_ipc(rank, world, send, recv, str(directory))
 
-    for iteration in range(iters):
-        # The current API bootstraps IPC handles for every invocation.
-        ipc_dir = root / f"tiny_iter_{iteration}"
-        tiny.tiny_ring_allreduce_sum_ipc(
-            rank, world, send, recv, str(ipc_dir)
-        )
-
-    torch.cuda.synchronize(local_rank)
-    barrier(local_rank)
-    elapsed = time.perf_counter() - start
-    return elapsed / iters, recv
+    seconds = _time(run_once, warmup, iters, local_rank)
+    return seconds, recv
 
 
 def run_tiny_persistent(
@@ -109,7 +113,6 @@ def run_tiny_persistent(
     warmup: int,
     iters: int,
 ) -> tuple[float, torch.Tensor]:
-    count = send.numel()
     recv = torch.empty_like(send)
 
     comm_dir = root / "comm"
@@ -117,22 +120,11 @@ def run_tiny_persistent(
         comm_dir.mkdir(parents=True, exist_ok=True)
     barrier(local_rank)
 
-    comm = tiny.RingCommunicator(rank, world, count, str(comm_dir))
-
-    for _ in range(warmup):
-        comm.allreduce(send, recv)
-
-    torch.cuda.synchronize(local_rank)
-    barrier(local_rank)
-    start = time.perf_counter()
-
-    for _ in range(iters):
-        comm.allreduce(send, recv)
-
-    torch.cuda.synchronize(local_rank)
-    barrier(local_rank)
-    elapsed = time.perf_counter() - start
-    return elapsed / iters, recv
+    comm = tiny.RingCommunicator(rank, world, send.numel(), str(comm_dir))
+    seconds = _time(
+        lambda: comm.allreduce(send, recv), warmup, iters, local_rank
+    )
+    return seconds, recv
 
 
 def run_nccl(
@@ -143,20 +135,12 @@ def run_nccl(
 ) -> tuple[float, torch.Tensor]:
     result = torch.empty_like(send)
 
-    for _ in range(warmup):
+    def run_once() -> None:
         result.copy_(send)
         dist.all_reduce(result, op=dist.ReduceOp.SUM)
-    barrier(local_rank)
 
-    torch.cuda.synchronize(local_rank)
-    start = time.perf_counter()
-    for _ in range(iters):
-        result.copy_(send)
-        dist.all_reduce(result, op=dist.ReduceOp.SUM)
-    torch.cuda.synchronize(local_rank)
-    barrier(local_rank)
-    elapsed = time.perf_counter() - start
-    return elapsed / iters, result
+    seconds = _time(run_once, warmup, iters, local_rank)
+    return seconds, result
 
 
 def format_result(name: str, count: int, seconds: float, world: int) -> str:

@@ -31,7 +31,9 @@ void ipc_close_handle(void* mapped_ptr);
 
 // 批量交换 handles：每个 rank 把自己的 handle 写到共享目录，然后读取所有其他
 // rank 的 rank_dir: 例如 "/tmp/tinynccl_ipc" 返回: vector of IpcHandle，按 rank
-// 索引排序
+// 索引排序。
+//
+// 注意：handle 以结构体原始字节写入文件，要求所有 rank 使用相同 ABI 构建。
 std::vector<IpcHandle> ipc_exchange_handles(int my_rank, int world_size,
                                             void* my_ptr, size_t my_size,
                                             int my_device,
