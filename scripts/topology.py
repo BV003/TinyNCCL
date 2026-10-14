@@ -52,15 +52,6 @@ def _nvidia_smi(args: list[str]) -> str:
         return ""
 
 
-def _torch_cuda_count() -> int:
-    """Number of GPUs visible to PyTorch/torch.cuda."""
-    try:
-        import torch
-        return torch.cuda.device_count()
-    except Exception:
-        return 0
-
-
 def get_gpu_info() -> list[GPUInfo]:
     """List GPUs visible to nvidia-smi (falls back to torch if needed)."""
     gpus: list[GPUInfo] = []
