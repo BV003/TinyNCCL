@@ -211,19 +211,36 @@ void synchronized_copy(float* dst, float* src, size_t count, int device);
 const MemOps& mem_ops();
 void ensure_mem_ops_available();
 
-// 计数器信号编号：0 = 输入已拷贝，1..steps = reduce-scatter，steps+1..2*steps = all-gather
-uint32_t input_ready_signal(uint32_t base);
-uint32_t rs_step_signal(uint32_t base, int step);
-uint32_t ag_step_signal(uint32_t base, int steps, int step);
-uint32_t rs_step_dependency(uint32_t base, int step);
-uint32_t ag_step_dependency(uint32_t base, int steps, int step);
-
 // 单进程路径
 void impl_reduce_scatter(float** recv, int n_gpus, size_t chunk,
                          size_t chunk_bytes, const DeviceStreamBuffers& buffers);
 void impl_all_gather(float** recv, int n_gpus, size_t chunk,
                      size_t chunk_bytes, const DeviceStreamBuffers& buffers);
 ```
+
+### `ring_schedule.h`（Ring 调度的纯主机端计算）
+
+不依赖 CUDA 头文件，供 `ring_allreduce.cu` 使用，也可在纯 CPU 机器上单独测试。
+
+```cpp
+namespace tinynccl::ring {
+int prev_rank(int rank, int n);              // (rank - 1) mod n
+int rs_chunk(int rank, int step, int n);     // RS 第 s 步：(rank - s) mod n
+int owned_chunk(int rank, int n);            // RS 结束后持有的完整块：(rank + 2) mod n
+int ag_chunk(int rank, int step, int n);     // AG 第 s 步：(rank - s + 1) mod n
+
+// 计数器信号编号：0 = 输入已拷贝，1..steps = reduce-scatter，steps+1..2*steps = all-gather
+int      signals_per_call(int steps);        // 1 + 2*steps
+uint32_t input_ready_signal(uint32_t base);
+uint32_t rs_step_signal(uint32_t base, int step);
+uint32_t ag_step_signal(uint32_t base, int steps, int step);
+uint32_t rs_step_dependency(uint32_t base, int step);
+uint32_t ag_step_dependency(uint32_t base, int steps, int step);
+}
+```
+
+AG 第 0 步读取的必须是 prev 的 `owned_chunk`。n = 2 时 `(rank - s - 1)` 与
+`(rank - s + 1)` 恰好相同，所以这个下标写错只有在 3 卡及以上才会暴露。
 
 ### `bindings.cpp`（PyTorch 扩展入口）
 
@@ -297,7 +314,12 @@ run_case(count, n_gpus) -> None
 main() -> int          # test_fixed_data / test_vs_torch_distributed /
                        # test_persistent_communicator / smoke_test
 
-# 一键运行（编译 + 跑全套，< 2 卡自动跳过多进程测试）
+# test_ring_schedule.cpp（纯 CPU，无需 GPU）
+# 用 ring_schedule.h 的真实下标/信号计算，在随机交错执行下模拟 1..8 个 rank，
+# 覆盖持久化通信器（含多次调用重叠时的 epoch barrier）和单进程路径
+
+# 一键运行（编译 + 跑全套；多进程测试默认使用全部可见 GPU，可用 NPROC=N 覆盖；
+# < 2 卡自动跳过多进程测试）
 # scripts/run_tests.sh [--no-build]
 ```
 
@@ -346,6 +368,15 @@ classDiagram
     class TestHarness {
         <<tests>>
     }
+    class RunTests {
+        <<script>>
+    }
+    class RingSchedule {
+        <<header>>
+    }
+    class ScheduleTest {
+        <<tests>>
+    }
     class TorchCUDA {
         <<external>>
     }
@@ -366,10 +397,12 @@ classDiagram
     RingCommunicator --> Ipc : exchange / open handles
     RingCommunicator --> MemOps : signal / wait_for
     RingCommunicator --> CudaCheck : check_cuda
+    RingCommunicator --> RingSchedule : chunk indices / signals
 
     SingleProcessImpl --> DeviceStreamBuffers : owns
     SingleProcessImpl --> Transport : transport_copy
     SingleProcessImpl --> Kernels : tiny_reduce_sum_kernel
+    SingleProcessImpl --> RingSchedule : chunk indices
 
     MemOps --> CudaDriver : cudaGetDriverEntryPoint + cuStream*Value32
     Ipc ..> IpcHandle : creates / serializes
@@ -388,6 +421,7 @@ classDiagram
     BenchmarkScript ..> RingCommunicator : times allreduce
     BenchmarkScript ..> TorchCUDA : NCCL baseline (torch.distributed)
     TestHarness ..> TinyExtension : drives tests
-    TestHarness ..> scripts/run_tests.sh : entry point
+    RunTests ..> TestHarness : runs tests
+    RunTests ..> ScheduleTest : runs (CPU only)
+    ScheduleTest ..> RingSchedule : simulates
 ```
-
