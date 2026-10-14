@@ -11,8 +11,8 @@
 
 namespace {
 
-constexpr int kFileWaitMaxRetries = 1000;
-constexpr int kFileWaitRetryMicros = 10000;
+constexpr int kFileWaitRetryMicros = 100;
+constexpr int kFileWaitMaxRetries = 100000;  // ~10 s total timeout
 constexpr char kBarrierMarker[] = "ready\n";
 
 bool regular_file_with_size(const std::string& path, size_t expected_size) {
