@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -20,9 +21,9 @@ void tiny_ring_allreduce_sum_ipc(int my_rank, int world_size, float* sendbuff,
 
 // 持久化 communicator：通信建立一次，之后可重复调用 allreduce。
 //
-// 与无状态版本的差别：显存句柄 / 事件句柄只在构造时交换、且远端指针与
-// 远端事件只在构造时打开，因此每次 allreduce 省掉了昂贵的
-// cudaIpcOpenMemHandle 与文件 rendezvous。
+// 同步完全走 GPU 侧：每个 rank 有一个单调递增的显存计数器，rank 在 stream
+// 上用 cuStreamWriteValue32 递增它、用 cuStreamWaitValue32 等待邻居的计数器。
+// 因此 steady-state 每次 allreduce 不涉及文件、事件创建或 CPU 侧往返。
 class RingCommunicator {
 public:
     // max_count 是每次 allreduce 允许的最大元素数，必须是 world_size 的倍数。
@@ -44,16 +45,18 @@ private:
     void initialize();
     void setup_stream_and_buffers();
     void setup_remote_memory();
-    void reduce_scatter(size_t count);
-    void all_gather(size_t count);
-    void release_call_events();
+    void reduce_scatter(size_t count, uint32_t base);
+    void all_gather(size_t count, uint32_t base);
+    void signal(uint32_t value);
+    void wait_for(int rank, uint32_t value, const char* what);
     void teardown();
+
+    int signals_per_call() const { return 1 + 2 * steps_; }
 
     const int my_rank_;
     const int world_size_;
     const size_t max_count_;
     const std::string ipc_dir_;
-    std::string call_dir_;
     int steps_ = 0;
     int prev_ = 0;
     size_t epoch_ = 0;
@@ -62,17 +65,11 @@ private:
     cudaStream_t stream_ = nullptr;
     float* tmp_ = nullptr;
     float* commbuff_ = nullptr;
-
-    IpcEventSet init_events_{};
-    bool init_events_created_ = false;
-    cudaEvent_t remote_init_ready_ = nullptr;
-    std::vector<IpcEventSet> rs_events_;
-    std::vector<IpcEventSet> ag_events_;
-    std::vector<cudaEvent_t> remote_rs_events_;
-    std::vector<cudaEvent_t> remote_ag_events_;
+    uint32_t* counter_ = nullptr;
 
     std::vector<IpcHandle> handles_;
     std::vector<float*> remote_ptrs_;
+    std::vector<uint32_t*> remote_counters_;
 };
 
 #endif  // TINYNCCL_RING_ALLREDUCE_H
