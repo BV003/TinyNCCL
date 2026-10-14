@@ -7,6 +7,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "cuda_check.h"
+
 namespace {
 
 constexpr int kFileWaitMaxRetries = 1000;
@@ -52,13 +54,6 @@ void atomic_write(const std::string& path, const void* data, size_t size) {
 }
 
 }  // namespace
-
-static void check_cuda(cudaError_t err, const char* msg) {
-    if (err != cudaSuccess) {
-        throw std::runtime_error(
-            std::string(msg) + ": " + cudaGetErrorString(err));
-    }
-}
 
 IpcHandle ipc_create_handle(void* ptr, size_t size, int device) {
     IpcHandle handle{};
@@ -143,7 +138,11 @@ IpcEventSet ipc_create_events(int device) {
 
 void ipc_destroy_events(IpcEventSet& events) {
     int old_device;
-    if (cudaGetDevice(&old_device) != cudaSuccess) return;
+    if (cudaGetDevice(&old_device) != cudaSuccess) {
+        // Best-effort teardown, called from destructors: it must not throw.
+        cudaGetLastError();
+        return;
+    }
     if (events.device >= 0) cudaSetDevice(events.device);
     if (events.init_ready) cudaEventDestroy(events.init_ready);
     if (events.reduce_scatter_done) cudaEventDestroy(events.reduce_scatter_done);

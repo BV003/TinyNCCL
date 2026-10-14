@@ -6,17 +6,16 @@
 #include "transport.h"
 #include "kernels.h"
 #include "ipc.h"
+#include "cuda_check.h"
 
 namespace {
 
 void check_cuda_ipc(cudaError_t err, const char* operation,
                     int rank, const char* phase, int step) {
-    if (err != cudaSuccess) {
-        throw std::runtime_error(
-            std::string("[rank=") + std::to_string(rank) + "] " +
-            phase + " step=" + std::to_string(step) + " " + operation +
-            " failed: " + cudaGetErrorString(err));
-    }
+    check_cuda(err,
+               std::string("[rank=") + std::to_string(rank) + "] " +
+                   phase + " step=" + std::to_string(step) + " " +
+                   operation + " failed");
 }
 
 // One multi-process Ring AllReduce over CUDA IPC.
