@@ -35,6 +35,15 @@ pip install -e . --no-build-isolation
 
 ## Tests 
 
+Run the whole suite (builds first, then runs every test that fits this
+machine — multi-process tests are skipped when fewer than 2 GPUs are visible):
+
+```bash
+scripts/run_tests.sh              # add --no-build to skip the re-install
+```
+
+Or run them individually:
+
 ```bash
 torchrun --nproc_per_node=2 tests/smoke_test.py
 python tests/test_kernels.py
