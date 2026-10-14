@@ -1,12 +1,14 @@
 #include "ring_allreduce.h"
 
-#include <vector>
-#include <stdexcept>
+#include <sys/stat.h>
 
-#include "transport.h"
-#include "kernels.h"
-#include "ipc.h"
+#include <stdexcept>
+#include <vector>
+
 #include "cuda_check.h"
+#include "ipc.h"
+#include "kernels.h"
+#include "transport.h"
 
 namespace {
 
@@ -26,120 +28,143 @@ std::string step_event_dir(const std::string& ipc_dir, const char* phase,
     return ipc_dir + "/" + phase + "_done_step_" + std::to_string(step);
 }
 
-// One multi-process Ring AllReduce over CUDA IPC.
+void synchronized_copy(float* dst, float* src, size_t count, int device) {
+    cudaSetDevice(device);
+    cudaMemcpy(dst, src, count * sizeof(float), cudaMemcpyDeviceToDevice);
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// RingCommunicator
 //
-// Owns every CUDA/IPC resource it acquires, so the destructor releases them
-// even when a phase throws (the entry point constructs it before initialize()).
-class RingSession {
-public:
-    RingSession(int my_rank, int world_size, float* sendbuff, float* recvbuff,
-                size_t count, const std::string& ipc_dir)
-        : my_rank_(my_rank),
-          world_size_(world_size),
-          sendbuff_(sendbuff),
-          recvbuff_(recvbuff),
-          count_(count),
-          chunk_(count / static_cast<size_t>(world_size)),
-          chunk_bytes_(chunk_ * sizeof(float)),
-          steps_(world_size - 1),
-          prev_((my_rank - 1 + world_size) % world_size),
-          ipc_dir_(ipc_dir) {}
+// Persistent state (buffers, memory mapping, stream) is set up once. The IPC
+// event objects are intentionally recreated per allreduce: cudaStreamWaitEvent
+// captures the event's latest record at call time, so a reused event would let
+// a rank proceed on the *previous* call's record before the peer re-records it.
+// ---------------------------------------------------------------------------
 
-    ~RingSession() { teardown(); }
+RingCommunicator::RingCommunicator(int my_rank, int world_size,
+                                   size_t max_count, const std::string& ipc_dir)
+    : my_rank_(my_rank),
+      world_size_(world_size),
+      max_count_(max_count),
+      ipc_dir_(ipc_dir) {
+    if (world_size <= 0)
+        throw std::runtime_error("world_size must be >= 1");
+    if (my_rank < 0 || my_rank >= world_size)
+        throw std::runtime_error("my_rank is outside world_size");
+    if (max_count == 0 || max_count % static_cast<size_t>(world_size) != 0)
+        throw std::runtime_error(
+            "max_count must be positive and divisible by world_size");
 
-    RingSession(const RingSession&) = delete;
-    RingSession& operator=(const RingSession&) = delete;
+    steps_ = world_size - 1;
+    prev_ = (my_rank - 1 + world_size) % world_size;
 
-    void initialize();
-    void run();
+    // If setup fails partway, still release whatever was acquired.
+    try {
+        initialize();
+    } catch (...) {
+        teardown();
+        throw;
+    }
+}
 
-private:
-    void setup_init_event();
-    void setup_remote_buffers();
-    void reduce_scatter();
-    void all_gather();
-    void copy_result_out();
-    void teardown();
+RingCommunicator::~RingCommunicator() {
+    teardown();
+}
 
-    const int my_rank_;
-    const int world_size_;
-    float* const sendbuff_;
-    float* const recvbuff_;
-    const size_t count_;
-    const size_t chunk_;
-    const size_t chunk_bytes_;
-    const int steps_;
-    const int prev_;
-    const std::string ipc_dir_;
+void RingCommunicator::initialize() {
+    setup_stream_and_buffers();
+    setup_remote_memory();
+}
 
-    int local_dev_ = -1;
-    cudaStream_t stream_ = nullptr;
-    float* tmp_ = nullptr;
-    float* commbuff_ = nullptr;
+void RingCommunicator::setup_stream_and_buffers() {
+    const size_t max_chunk = max_count_ / static_cast<size_t>(world_size_);
 
-    IpcEventSet init_events_{};
-    bool init_events_created_ = false;
-    cudaEvent_t remote_init_ready_ = nullptr;
-
-    std::vector<IpcHandle> handles_;
-    std::vector<float*> remote_ptrs_;
-    std::vector<IpcEventSet> rs_events_;
-    std::vector<IpcEventSet> ag_events_;
-    std::vector<cudaEvent_t> remote_rs_events_;
-    std::vector<cudaEvent_t> remote_ag_events_;
-};
-
-void RingSession::initialize() {
     check_cuda_ipc(cudaGetDevice(&local_dev_), "cudaGetDevice", my_rank_,
                    "init", -1);
     check_cuda_ipc(cudaStreamCreate(&stream_), "cudaStreamCreate", my_rank_,
                    "init", -1);
-    check_cuda_ipc(cudaMalloc(&tmp_, chunk_bytes_), "cudaMalloc(tmp)", my_rank_,
-                   "init", -1);
-    check_cuda_ipc(cudaMalloc(&commbuff_, count_ * sizeof(float)),
+    check_cuda_ipc(cudaMalloc(&tmp_, max_chunk * sizeof(float)),
+                   "cudaMalloc(tmp)", my_rank_, "init", -1);
+    check_cuda_ipc(cudaMalloc(&commbuff_, max_count_ * sizeof(float)),
                    "cudaMalloc(commbuff)", my_rank_, "init", -1);
-    check_cuda_ipc(cudaMemcpy(commbuff_, sendbuff_, count_ * sizeof(float),
-                              cudaMemcpyDeviceToDevice),
-                   "cudaMemcpy(init)", my_rank_, "init", -1);
-    check_cuda_ipc(cudaGetLastError(), "cudaGetLastError(init)", my_rank_,
-                   "init", -1);
-
-    setup_init_event();
-    setup_remote_buffers();
-
-    rs_events_.resize(steps_);
-    ag_events_.resize(steps_);
-    remote_rs_events_.assign(steps_, nullptr);
-    remote_ag_events_.assign(steps_, nullptr);
 }
 
-void RingSession::setup_init_event() {
-    init_events_ = ipc_create_events(local_dev_);
-    init_events_created_ = true;
-    check_cuda_ipc(cudaEventRecord(init_events_.init_ready, stream_),
-                   "record init_ready", my_rank_, "EVENT", -1);
-
-    std::vector<IpcEventHandleSet> event_handles = ipc_exchange_event_handles(
-        my_rank_, world_size_, init_events_, ipc_dir_ + kInitEventsSubdir);
-    remote_init_ready_ =
-        ipc_open_event(event_handles[prev_].init_ready_handle, local_dev_);
-}
-
-void RingSession::setup_remote_buffers() {
+void RingCommunicator::setup_remote_memory() {
     handles_ =
         ipc_exchange_handles(my_rank_, world_size_, commbuff_,
-                             count_ * sizeof(float), local_dev_, ipc_dir_);
+                             max_count_ * sizeof(float), local_dev_, ipc_dir_);
 
     remote_ptrs_.assign(world_size_, nullptr);
     for (int r = 0; r < world_size_; r++) {
         remote_ptrs_[r] =
             (r == my_rank_)
-                ? commbuff_  // our own communication buffer, not IPC-mapped
+                ? commbuff_  // our own buffer, not IPC-mapped
                 : static_cast<float*>(ipc_open_handle(handles_[r], local_dev_));
     }
 }
 
-void RingSession::reduce_scatter() {
+void RingCommunicator::allreduce(float* sendbuff, float* recvbuff,
+                                 size_t count) {
+    if (count == 0 || count > max_count_ ||
+        count % static_cast<size_t>(world_size_) != 0) {
+        throw std::runtime_error(
+            "count must be positive, <= max_count and divisible by world_size");
+    }
+
+    try {
+        // The comm buffer is reused across calls, so make sure every rank has
+        // finished the previous allreduce before we overwrite it. Each call
+        // also gets a fresh rendezvous directory, keyed by epoch, because the
+        // per-call event handles differ every time.
+        const size_t this_epoch = epoch_;
+        ipc_barrier(my_rank_, world_size_, ipc_dir_, "epoch",
+                    static_cast<int>(this_epoch));
+        epoch_++;
+        call_dir_ = ipc_dir_ + "/epoch_" + std::to_string(this_epoch);
+        mkdir(call_dir_.c_str(), 0755);
+
+        init_events_ = ipc_create_events(local_dev_);
+        init_events_created_ = true;
+
+        check_cuda_ipc(
+            cudaMemcpyAsync(commbuff_, sendbuff, count * sizeof(float),
+                            cudaMemcpyDeviceToDevice, stream_),
+            "cudaMemcpy(init)", my_rank_, "init", -1);
+        check_cuda_ipc(cudaEventRecord(init_events_.init_ready, stream_),
+                       "record init_ready", my_rank_, "EVENT", -1);
+
+        std::vector<IpcEventHandleSet> init_handles =
+            ipc_exchange_event_handles(my_rank_, world_size_, init_events_,
+                                       call_dir_ + kInitEventsSubdir);
+        remote_init_ready_ =
+            ipc_open_event(init_handles[prev_].init_ready_handle, local_dev_);
+
+        reduce_scatter(count);
+        all_gather(count);
+
+        check_cuda_ipc(cudaStreamSynchronize(stream_),
+                       "final cudaStreamSynchronize", my_rank_, "final", -1);
+        check_cuda_ipc(cudaMemcpy(recvbuff, commbuff_, count * sizeof(float),
+                                  cudaMemcpyDeviceToDevice),
+                       "cudaMemcpy(final recvbuff)", my_rank_, "final", -1);
+    } catch (...) {
+        release_call_events();
+        throw;
+    }
+
+    release_call_events();
+}
+
+void RingCommunicator::reduce_scatter(size_t count) {
+    const size_t chunk = count / static_cast<size_t>(world_size_);
+    const size_t chunk_bytes = chunk * sizeof(float);
+
+    rs_events_.resize(steps_);
+    remote_rs_events_.assign(steps_, nullptr);
+
     for (int step = 0; step < steps_; step++) {
         const int idx = (my_rank_ - step + world_size_) % world_size_;
 
@@ -150,12 +175,11 @@ void RingSession::reduce_scatter() {
             (step == 0) ? "wait init_ready" : "wait reduce_scatter_done",
             my_rank_, "EVENT", step);
 
-        transport_copy_ipc(tmp_, local_dev_, remote_ptrs_[prev_] + idx * chunk_,
-                           handles_[prev_].device, chunk_bytes_, stream_);
+        transport_copy_ipc(tmp_, local_dev_, remote_ptrs_[prev_] + idx * chunk,
+                           handles_[prev_].device, chunk_bytes, stream_);
 
-        tiny_reduce_sum_kernel(commbuff_ + idx * chunk_,
-                               commbuff_ + idx * chunk_, tmp_,
-                               static_cast<int>(chunk_), stream_);
+        tiny_reduce_sum_kernel(commbuff_ + idx * chunk, commbuff_ + idx * chunk,
+                               tmp_, static_cast<int>(chunk), stream_);
         check_cuda_ipc(cudaGetLastError(), "kernel launch", my_rank_, "RS",
                        step);
 
@@ -164,17 +188,22 @@ void RingSession::reduce_scatter() {
                        "record reduce_scatter_done", my_rank_, "EVENT", step);
         check_cuda_ipc(cudaStreamSynchronize(stream_), "cudaStreamSynchronize",
                        my_rank_, "RS", step);
-        ipc_barrier(my_rank_, world_size_, ipc_dir_, kReduceScatterPhase, step);
 
         std::vector<IpcEventHandleSet> rs_handles = ipc_exchange_event_handles(
             my_rank_, world_size_, rs_events_[step],
-            step_event_dir(ipc_dir_, kReduceScatterPhase, step));
+            step_event_dir(call_dir_, kReduceScatterPhase, step));
         remote_rs_events_[step] =
             ipc_open_event(rs_handles[prev_].step_done_handle, local_dev_);
     }
 }
 
-void RingSession::all_gather() {
+void RingCommunicator::all_gather(size_t count) {
+    const size_t chunk = count / static_cast<size_t>(world_size_);
+    const size_t chunk_bytes = chunk * sizeof(float);
+
+    ag_events_.resize(steps_);
+    remote_ag_events_.assign(steps_, nullptr);
+
     for (int step = 0; step < steps_; step++) {
         const int chunk_idx = (my_rank_ - step - 1 + world_size_) % world_size_;
 
@@ -187,13 +216,13 @@ void RingSession::all_gather() {
             my_rank_, "EVENT", step);
 
         transport_copy_ipc(tmp_, local_dev_,
-                           remote_ptrs_[prev_] + chunk_idx * chunk_,
-                           handles_[prev_].device, chunk_bytes_, stream_);
+                           remote_ptrs_[prev_] + chunk_idx * chunk,
+                           handles_[prev_].device, chunk_bytes, stream_);
 
         check_cuda_ipc(cudaStreamSynchronize(stream_), "cudaStreamSynchronize",
                        my_rank_, "AG", step);
-        check_cuda_ipc(cudaMemcpy(commbuff_ + chunk_idx * chunk_, tmp_,
-                                  chunk_bytes_, cudaMemcpyDeviceToDevice),
+        check_cuda_ipc(cudaMemcpy(commbuff_ + chunk_idx * chunk, tmp_,
+                                  chunk_bytes, cudaMemcpyDeviceToDevice),
                        "cudaMemcpy(AG local)", my_rank_, "AG", step);
 
         ag_events_[step] = ipc_create_events(local_dev_);
@@ -201,48 +230,45 @@ void RingSession::all_gather() {
                        "record all_gather_done", my_rank_, "EVENT", step);
         check_cuda_ipc(cudaStreamSynchronize(stream_),
                        "cudaStreamSynchronize(AG local)", my_rank_, "AG", step);
-        ipc_barrier(my_rank_, world_size_, ipc_dir_, kAllGatherPhase, step);
 
         std::vector<IpcEventHandleSet> ag_handles = ipc_exchange_event_handles(
             my_rank_, world_size_, ag_events_[step],
-            step_event_dir(ipc_dir_, kAllGatherPhase, step));
+            step_event_dir(call_dir_, kAllGatherPhase, step));
         remote_ag_events_[step] =
             ipc_open_event(ag_handles[prev_].step_done_handle, local_dev_);
     }
 }
 
-void RingSession::copy_result_out() {
-    check_cuda_ipc(cudaStreamSynchronize(stream_),
-                   "final cudaStreamSynchronize", my_rank_, "final", -1);
-    check_cuda_ipc(cudaMemcpy(recvbuff_, commbuff_, count_ * sizeof(float),
-                              cudaMemcpyDeviceToDevice),
-                   "cudaMemcpy(final recvbuff)", my_rank_, "final", -1);
+void RingCommunicator::release_call_events() {
+    ipc_close_event(remote_init_ready_);
+    remote_init_ready_ = nullptr;
+    for (cudaEvent_t event : remote_rs_events_)
+        ipc_close_event(event);
+    for (cudaEvent_t event : remote_ag_events_)
+        ipc_close_event(event);
+    remote_rs_events_.clear();
+    remote_ag_events_.clear();
+
+    if (init_events_created_) {
+        ipc_destroy_events(init_events_);
+        init_events_created_ = false;
+    }
+    for (IpcEventSet& events : rs_events_)
+        ipc_destroy_events(events);
+    for (IpcEventSet& events : ag_events_)
+        ipc_destroy_events(events);
+    rs_events_.clear();
+    ag_events_.clear();
 }
 
-void RingSession::run() {
-    reduce_scatter();
-    all_gather();
-    copy_result_out();
-}
-
-void RingSession::teardown() {
+void RingCommunicator::teardown() {
+    release_call_events();
     for (int r = 0;
          r < world_size_ && r < static_cast<int>(remote_ptrs_.size()); r++) {
         if (r != my_rank_ && remote_ptrs_[r]) {
             ipc_close_handle(remote_ptrs_[r]);
         }
     }
-    ipc_close_event(remote_init_ready_);
-    for (cudaEvent_t event : remote_rs_events_)
-        ipc_close_event(event);
-    for (cudaEvent_t event : remote_ag_events_)
-        ipc_close_event(event);
-    if (init_events_created_)
-        ipc_destroy_events(init_events_);
-    for (IpcEventSet& events : rs_events_)
-        ipc_destroy_events(events);
-    for (IpcEventSet& events : ag_events_)
-        ipc_destroy_events(events);
     if (stream_)
         cudaStreamDestroy(stream_);
     if (tmp_)
@@ -251,12 +277,9 @@ void RingSession::teardown() {
         cudaFree(commbuff_);
 }
 
-void synchronized_copy(float* dst, float* src, size_t count, int device) {
-    cudaSetDevice(device);
-    cudaMemcpy(dst, src, count * sizeof(float), cudaMemcpyDeviceToDevice);
-}
-
-}  // namespace
+// ---------------------------------------------------------------------------
+// Entry points
+// ---------------------------------------------------------------------------
 
 void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
                                   int n_gpus) {
@@ -329,15 +352,6 @@ void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
 void tiny_ring_allreduce_sum_ipc(int my_rank, int world_size, float* sendbuff,
                                  float* recvbuff, size_t count,
                                  const std::string& ipc_dir) {
-    if (world_size <= 0)
-        throw std::runtime_error("world_size must be >= 1");
-    if (my_rank < 0 || my_rank >= world_size)
-        throw std::runtime_error("my_rank is outside world_size");
-    if (count % static_cast<size_t>(world_size) != 0)
-        throw std::runtime_error("count must be divisible by world_size");
-
-    RingSession session(my_rank, world_size, sendbuff, recvbuff, count,
-                        ipc_dir);
-    session.initialize();
-    session.run();
+    RingCommunicator communicator(my_rank, world_size, count, ipc_dir);
+    communicator.allreduce(sendbuff, recvbuff, count);
 }

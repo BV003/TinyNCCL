@@ -110,4 +110,33 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def(
         "tiny_ring_allreduce_sum_ipc", &ipc_allreduce_wrapper,
         "Ring AllReduce (sum) across GPUs in multiple processes via CUDA IPC");
+
+    pybind11::class_<RingCommunicator>(m, "RingCommunicator")
+        .def(pybind11::init<int, int, size_t, std::string>(),
+             pybind11::arg("my_rank"), pybind11::arg("world_size"),
+             pybind11::arg("max_count"), pybind11::arg("ipc_dir"),
+             "Persistent CUDA IPC communicator: set up once, reuse many "
+             "times")
+        .def(
+            "allreduce",
+            [](RingCommunicator& self, torch::Tensor sendbuff,
+               torch::Tensor recvbuff) {
+                require_float32(sendbuff, "sendbuff");
+                require_float32(recvbuff, "recvbuff");
+                require_cuda(sendbuff, "sendbuff");
+                require_cuda(recvbuff, "recvbuff");
+                require_same_shape(sendbuff, recvbuff,
+                                   "sendbuff and recvbuff must have same "
+                                   "shape");
+                const size_t count = sendbuff.numel();
+                require_divisible(count, static_cast<size_t>(self.world_size()),
+                                  "numel");
+                TORCH_CHECK(count <= self.max_count(),
+                            "count exceeds communicator max_count");
+                self.allreduce(sendbuff.data_ptr<float>(),
+                               recvbuff.data_ptr<float>(), count);
+            },
+            pybind11::arg("sendbuff"), pybind11::arg("recvbuff"))
+        .def_property_readonly("world_size", &RingCommunicator::world_size)
+        .def_property_readonly("max_count", &RingCommunicator::max_count);
 }
