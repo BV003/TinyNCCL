@@ -9,8 +9,7 @@
 
 namespace {
 
-// Number of devices tracked in the P2P / staging caches below. The ring
-// collective itself supports any world size; this only bounds the caches.
+// Bounds the P2P / staging caches below; unrelated to supported world size.
 constexpr int kMaxTrackedDevices = 8;
 
 enum class P2pState : int { kUnknown = 0, kSupported = 1, kUnsupported = 2 };
@@ -23,8 +22,7 @@ std::array<std::array<P2pState, kMaxTrackedDevices>, kMaxTrackedDevices>
 std::array<void*, kMaxTrackedDevices> g_staging{};
 std::array<size_t, kMaxTrackedDevices> g_staging_size{};
 
-// Save the current device and restore it on scope exit, so an exception in the
-// middle of a copy no longer leaves the caller on the wrong device.
+// Restores the current device on scope exit, including on exceptions.
 class DeviceGuard {
 public:
     DeviceGuard() { check_cuda(cudaGetDevice(&saved_), "cudaGetDevice"); }

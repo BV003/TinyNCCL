@@ -17,7 +17,6 @@ void check_cuda_ipc(cudaError_t err, const char* operation, int rank,
                         operation + " failed");
 }
 
-// Barrier phases and the directory suffix used to exchange each step's events.
 constexpr char kReduceScatterPhase[] = "rs";
 constexpr char kAllGatherPhase[] = "ag";
 constexpr char kInitEventsSubdir[] = "/init_events";
@@ -29,10 +28,8 @@ std::string step_event_dir(const std::string& ipc_dir, const char* phase,
 
 // One multi-process Ring AllReduce over CUDA IPC.
 //
-// Owns every CUDA/IPC resource it acquires so that an exception thrown in any
-// phase still releases them in the destructor (the public entry point
-// constructs the object, then calls initialize()/run(), so the destructor is
-// guaranteed to run even when setup fails).
+// Owns every CUDA/IPC resource it acquires, so the destructor releases them
+// even when a phase throws (the entry point constructs it before initialize()).
 class RingSession {
 public:
     RingSession(int my_rank, int world_size, float* sendbuff, float* recvbuff,
