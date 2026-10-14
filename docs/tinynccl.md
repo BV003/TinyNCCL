@@ -328,100 +328,53 @@ main() -> int          # test_fixed_data / test_vs_torch_distributed /
 ## 4. Relations
 
 ```mermaid
-%%{init: {'class': {'hideEmptyMembersBox': true}}}%%
 classDiagram
     direction LR
 
-    class TinyExtension {
+    class tiny {
         <<pybind11 module>>
+        tiny_reduce_sum()
+        tiny_copy_peer()
+        tiny_ring_allreduce_sum()
     }
-    class RingCommunicator
-    class SingleProcessImpl {
+    class RingCommunicator {
+        allreduce(sendbuff, recvbuff, count)
+        -reduce_scatter()
+        -all_gather()
+        -signal()
+        -wait_for()
+    }
+    class tiny_ring_allreduce_sum_impl {
         <<function>>
     }
-    class Transport {
-        <<module>>
-    }
-    class Kernels {
-        <<module>>
-    }
-    class Ipc {
-        <<module>>
-    }
-    class CudaCheck {
-        <<header>>
-    }
-    class MemOps {
+    class IpcHandle {
         <<struct>>
     }
-    class IpcHandle
-    class DeviceGuard
-    class DeviceStreamBuffers
-    class GPUInfo
-    class NodeTopology
-    class TopologyScript {
-        <<script>>
+    class ipc {
+        <<module>>
     }
-    class BenchmarkScript {
-        <<script>>
+    class transport {
+        <<module>>
     }
-    class TestHarness {
-        <<tests>>
+    class kernels {
+        <<module>>
     }
-    class RunTests {
-        <<script>>
-    }
-    class RingSchedule {
+    class ring_schedule {
         <<header>>
     }
-    class ScheduleTest {
-        <<tests>>
-    }
-    class TorchCUDA {
-        <<external>>
-    }
-    class NvidiaSMI {
-        <<external>>
-    }
-    class CudaDriver {
-        <<external>>
-    }
 
-    TinyExtension --> RingCommunicator : binds class
-    TinyExtension --> Transport : tiny_copy_peer
-    TinyExtension --> Kernels : tiny_reduce_sum
-    TinyExtension ..> SingleProcessImpl : tiny_ring_allreduce_sum
+    tiny --> RingCommunicator : 绑定类
+    tiny --> tiny_ring_allreduce_sum_impl : 单进程多卡
 
-    RingCommunicator --> Transport : transport_copy_ipc
-    RingCommunicator --> Kernels : tiny_reduce_sum_kernel
-    RingCommunicator --> Ipc : exchange / open handles
-    RingCommunicator --> MemOps : signal / wait_for
-    RingCommunicator --> CudaCheck : check_cuda
-    RingCommunicator --> RingSchedule : chunk indices / signals
+    RingCommunicator *-- IpcHandle : handles_
+    RingCommunicator --> ipc : 交换/打开远端句柄
+    RingCommunicator --> transport : transport_copy_ipc
+    RingCommunicator --> kernels : reduce kernel
+    RingCommunicator --> ring_schedule : chunk 下标 / 信号值
 
-    SingleProcessImpl --> DeviceStreamBuffers : owns
-    SingleProcessImpl --> Transport : transport_copy
-    SingleProcessImpl --> Kernels : tiny_reduce_sum_kernel
-    SingleProcessImpl --> RingSchedule : chunk indices
+    tiny_ring_allreduce_sum_impl --> transport : transport_copy
+    tiny_ring_allreduce_sum_impl --> kernels : reduce kernel
+    tiny_ring_allreduce_sum_impl --> ring_schedule : chunk 下标
 
-    MemOps --> CudaDriver : cudaGetDriverEntryPoint + cuStream*Value32
-    Ipc ..> IpcHandle : creates / serializes
-    Ipc --> CudaCheck : check_cuda
-    Transport --> DeviceGuard : restores device
-    Transport --> CudaCheck : check_cuda
-    Transport --> TorchCUDA : cudaMemcpyPeerAsync / cudaMemcpyAsync
-    Kernels --> TorchCUDA : launches kernel on stream
-    Ipc --> TorchCUDA : cudaIpc* APIs
-
-    NodeTopology "1" o-- "0..*" GPUInfo : contains
-    TopologyScript ..> NodeTopology : detect / format_report
-    TopologyScript --> NvidiaSMI : queries
-    TopologyScript --> TorchCUDA : probes P2P
-
-    BenchmarkScript ..> RingCommunicator : times allreduce
-    BenchmarkScript ..> TorchCUDA : NCCL baseline (torch.distributed)
-    TestHarness ..> TinyExtension : drives tests
-    RunTests ..> TestHarness : runs tests
-    RunTests ..> ScheduleTest : runs (CPU only)
-    ScheduleTest ..> RingSchedule : simulates
+    ipc ..> IpcHandle : 创建 / 读写文件
 ```
