@@ -1,38 +1,30 @@
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 
 import torch
 import torch.distributed as dist
 
 import tiny
-
-
-def barrier(local_rank: int) -> None:
-    dist.barrier(device_ids=[local_rank])
+from harness import (
+    all_ranks_ok,
+    barrier,
+    cleanup_ipc_root,
+    init_distributed,
+    make_ipc_root,
+)
 
 
 def main() -> int:
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl")
-
-    rank = dist.get_rank()
-    world = dist.get_world_size()
+    rank, world, local_rank = init_distributed()
     if world < 2:
         if rank == 0:
             print("skip: needs at least 2 ranks")
         dist.destroy_process_group()
         return 0
 
-    run_id = f"{os.getppid()}_{os.environ.get('MASTER_PORT', 'default')}"
-    ipc_root = f"/tmp/tinynccl_random_{run_id}"
-    if rank == 0:
-        shutil.rmtree(ipc_root, ignore_errors=True)
-        os.makedirs(ipc_root, exist_ok=True)
-    barrier(local_rank)
+    ipc_root = make_ipc_root("random", rank, local_rank)
 
     all_ok = True
     base_seed = 12345
@@ -65,16 +57,10 @@ def main() -> int:
                     f"  idx={index}: tiny={recv[index].item():.6f} "
                     f"nccl={reference[index].item():.6f}"
                 )
-        all_ok = all_ok and local_ok
+        all_ok = all_ranks_ok(all_ok and local_ok, local_rank)
 
-        result = torch.tensor([int(local_ok)], device="cuda", dtype=torch.int32)
-        dist.all_reduce(result, op=dist.ReduceOp.MIN)
-        all_ok = bool(result.item())
-        barrier(local_rank)
-
-    barrier(local_rank)
+    cleanup_ipc_root(ipc_root, rank, local_rank)
     if rank == 0:
-        shutil.rmtree(ipc_root, ignore_errors=True)
         print("PASS: TinyNCCL matches NCCL" if all_ok else "FAIL: mismatch detected")
     dist.destroy_process_group()
     return 0 if all_ok else 1
