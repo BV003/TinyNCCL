@@ -10,6 +10,7 @@
 #include "cuda_check.h"
 #include "ipc.h"
 #include "kernels.h"
+#include "ring_schedule.h"
 #include "transport.h"
 
 namespace {
@@ -69,31 +70,13 @@ void ensure_mem_ops_available() {
     (void)mem_ops();
 }
 
-// A call emits 1 + 2*steps signals in this order: input copied, then the
-// reduce-scatter steps, then the all-gather steps. After signal k the counter
-// reaches base + k + 1, so a rank waits for the done-signal of the previous
-// dependency.
-uint32_t input_ready_signal(uint32_t base) {
-    return base + 1;
-}
-
-uint32_t rs_step_signal(uint32_t base, int step) {
-    return base + step + 2;
-}
-
-uint32_t ag_step_signal(uint32_t base, int steps, int step) {
-    return base + steps + step + 2;
-}
-
-uint32_t rs_step_dependency(uint32_t base, int step) {
-    return step == 0 ? input_ready_signal(base)
-                     : rs_step_signal(base, step - 1);
-}
-
-uint32_t ag_step_dependency(uint32_t base, int steps, int step) {
-    return step == 0 ? rs_step_signal(base, steps - 1)
-                     : ag_step_signal(base, steps, step - 1);
-}
+using tinynccl::ring::ag_chunk;
+using tinynccl::ring::ag_step_dependency;
+using tinynccl::ring::ag_step_signal;
+using tinynccl::ring::input_ready_signal;
+using tinynccl::ring::rs_chunk;
+using tinynccl::ring::rs_step_dependency;
+using tinynccl::ring::rs_step_signal;
 
 }  // namespace
 
@@ -242,7 +225,7 @@ void RingCommunicator::reduce_scatter(size_t count, uint32_t base) {
     const size_t chunk_bytes = chunk * sizeof(float);
 
     for (int step = 0; step < steps_; step++) {
-        const int idx = (my_rank_ - step + world_size_) % world_size_;
+        const int idx = rs_chunk(my_rank_, step, world_size_);
 
         wait_for(prev_, rs_step_dependency(base, step), "reduce-scatter");
         transport_copy_ipc(scratch_, local_dev_,
@@ -263,7 +246,9 @@ void RingCommunicator::all_gather(size_t count, uint32_t base) {
     const size_t chunk_bytes = chunk * sizeof(float);
 
     for (int step = 0; step < steps_; step++) {
-        const int chunk_idx = (my_rank_ - step - 1 + world_size_) % world_size_;
+        // prev holds the fully reduced chunk owned_chunk(prev) after
+        // reduce-scatter, and forwards one more chunk per step.
+        const int chunk_idx = ag_chunk(my_rank_, step, world_size_);
 
         wait_for(prev_, ag_step_dependency(base, steps_, step), "all-gather");
         transport_copy_ipc(scratch_, local_dev_,
@@ -372,7 +357,7 @@ void impl_reduce_scatter(float** recv, int n_gpus, size_t chunk,
     for (int step = 0; step < n_gpus - 1; step++) {
         for (int i = 0; i < n_gpus; i++) {
             const int prev = (i - 1 + n_gpus) % n_gpus;
-            const int idx = (i - step + n_gpus) % n_gpus;
+            const int idx = rs_chunk(i, step, n_gpus);
 
             check_cuda(cudaSetDevice(i), "cudaSetDevice");
             transport_copy(buffers.scratch(i), i, recv[prev] + idx * chunk,
@@ -392,15 +377,18 @@ void impl_reduce_scatter(float** recv, int n_gpus, size_t chunk,
 
 void impl_all_gather(float** recv, int n_gpus, size_t chunk, size_t chunk_bytes,
                      const DeviceStreamBuffers& buffers) {
+    // Same pull schedule as RingCommunicator::all_gather: at each step GPU i
+    // copies chunk ag_chunk(i, step) from its predecessor. Within a step every
+    // GPU writes a different chunk than the one its successor reads, and the
+    // device synchronizations separate the steps.
     for (int step = 0; step < n_gpus - 1; step++) {
         for (int i = 0; i < n_gpus; i++) {
-            const int own_chunk = i;
-            const int send_dst = (i + 1) % n_gpus;
+            const int prev = (i - 1 + n_gpus) % n_gpus;
+            const int idx = ag_chunk(i, step, n_gpus);
 
-            check_cuda(cudaSetDevice(send_dst), "cudaSetDevice");
-            transport_copy(recv[send_dst] + own_chunk * chunk, send_dst,
-                           recv[i] + own_chunk * chunk, i, chunk_bytes,
-                           buffers.stream(send_dst));
+            check_cuda(cudaSetDevice(i), "cudaSetDevice");
+            transport_copy(recv[i] + idx * chunk, i, recv[prev] + idx * chunk,
+                           prev, chunk_bytes, buffers.stream(i));
         }
 
         for (int dev = 0; dev < n_gpus; dev++) {
