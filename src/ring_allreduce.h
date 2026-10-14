@@ -11,10 +11,6 @@
 #include "ipc.h"
 #include "ring_schedule.h"
 
-// Single-process, multi-GPU variant (kept for the single-process test).
-void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
-                                  int n_gpus);
-
 // Persistent communicator: set up once, then call allreduce repeatedly.
 //
 // Synchronization is entirely GPU-side: each rank owns a monotonically

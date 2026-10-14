@@ -57,7 +57,6 @@ c++ -std=c++17 -O2 -Isrc tests/test_ring_schedule.cpp -o /tmp/ring_schedule && /
 torchrun --nproc_per_node=2 tests/smoke_test.py
 python tests/test_kernels.py
 python tests/test_transport.py
-python tests/test_single_process.py
 torchrun --nproc_per_node=2 tests/test_fixed_data.py
 torchrun --nproc_per_node=2 tests/test_vs_torch_distributed.py
 torchrun --nproc_per_node=2 tests/test_persistent_communicator.py

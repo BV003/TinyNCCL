@@ -65,42 +65,11 @@ void tiny_copy_peer(torch::Tensor dst, torch::Tensor src) {
                    src.numel() * src.element_size(), stream);
 }
 
-void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
-                             std::vector<torch::Tensor> recvbuffs) {
-    const int n = static_cast<int>(sendbuffs.size());
-    TORCH_CHECK(n >= 1, "need at least 1 GPU");
-    TORCH_CHECK(static_cast<int>(recvbuffs.size()) == n,
-                "sendbuffs and recvbuffs must have the same size");
-    require_float32(sendbuffs[0], "sendbuffs");
-
-    const size_t count = sendbuffs[0].numel();
-    require_divisible(count, static_cast<size_t>(n), "numel");
-
-    std::vector<float*> send(n), recv(n);
-    for (int i = 0; i < n; i++) {
-        require_cuda(sendbuffs[i], "sendbuffs");
-        require_cuda(recvbuffs[i], "recvbuffs");
-        TORCH_CHECK(sendbuffs[i].get_device() == i,
-                    "sendbuffs must be ordered by device index");
-        TORCH_CHECK(recvbuffs[i].get_device() == i,
-                    "recvbuffs must be ordered by device index");
-        TORCH_CHECK(sendbuffs[i].numel() == static_cast<int64_t>(count) &&
-                        recvbuffs[i].numel() == static_cast<int64_t>(count),
-                    "all tensors must have the same size");
-        send[i] = sendbuffs[i].data_ptr<float>();
-        recv[i] = recvbuffs[i].data_ptr<float>();
-    }
-
-    tiny_ring_allreduce_sum_impl(send.data(), recv.data(), count, n);
-}
-
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("tiny_reduce_sum", &tiny_reduce_sum,
           "Element-wise float32 sum: dst = a + b");
     m.def("tiny_copy_peer", &tiny_copy_peer,
           "Copy data between CUDA devices: dst = src");
-    m.def("tiny_ring_allreduce_sum", &tiny_ring_allreduce_sum,
-          "Ring AllReduce (sum) across GPUs in a single process");
 
     pybind11::class_<RingCommunicator>(m, "RingCommunicator")
         .def(pybind11::init<int, int, size_t, std::string>(),

@@ -72,17 +72,6 @@ DeviceGuard();
 ~DeviceGuard();
 ```
 
-### `DeviceStreamBuffers`（`src/ring_allreduce.cu`，内部）
-
-单进程多卡路径（`tiny_ring_allreduce_sum_impl`）的 RAII 资源持有者：per-device 的 stream 与临时缓冲；部分分配失败时回滚已分配的资源。
-
-```cpp
-DeviceStreamBuffers(int n_gpus, size_t chunk_bytes);
-~DeviceStreamBuffers();
-cudaStream_t stream(int i) const;
-float*       scratch(int i) const;
-```
-
 ### `IpcHandle`（`src/ipc.h`）
 
 ```cpp
@@ -116,7 +105,6 @@ class NodeTopology:
 ```python
 tiny_reduce_sum(dst, a, b) -> None
 tiny_copy_peer(dst, src) -> None
-tiny_ring_allreduce_sum(sendbuffs, recvbuffs) -> None
 
 RingCommunicator(my_rank, world_size, max_count, ipc_dir)   # 类
     .allreduce(sendbuff, recvbuff) -> None
@@ -195,27 +183,14 @@ void tiny_reduce_sum_kernel(float* dst, const float* a, const float* b,
 
 ### `ring_allreduce.h` / `ring_allreduce.cu`
 
-```cpp
-// 单进程多 GPU 版本（保留用于单进程测试）
-void tiny_ring_allreduce_sum_impl(float** send, float** recv,
-                                  size_t count, int n_gpus);
-```
-
 内部辅助（匿名命名空间）：
 
 ```cpp
 void check_cuda_ipc(cudaError_t err, const char* operation,
                     int rank, const char* phase, int step);
-void synchronized_copy(float* dst, float* src, size_t count, int device);
 
 const MemOps& mem_ops();
 void ensure_mem_ops_available();
-
-// 单进程路径
-void impl_reduce_scatter(float** recv, int n_gpus, size_t chunk,
-                         size_t chunk_bytes, const DeviceStreamBuffers& buffers);
-void impl_all_gather(float** recv, int n_gpus, size_t chunk,
-                     size_t chunk_bytes, const DeviceStreamBuffers& buffers);
 ```
 
 ### `ring_schedule.h`（Ring 调度的纯主机端计算）
@@ -247,8 +222,6 @@ AG 第 0 步读取的必须是 prev 的 `owned_chunk`。n = 2 时 `(rank - s - 1
 ```cpp
 void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b);
 void tiny_copy_peer(torch::Tensor dst, torch::Tensor src);
-void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
-                             std::vector<torch::Tensor> recvbuffs);
 ```
 
 另注册 `RingCommunicator` 类（`.allreduce` / `.world_size` / `.max_count`）。
@@ -307,16 +280,13 @@ test_reduce_sum_large()  / test_reduce_sum_2d()
 # test_transport.py
 check_copy(src_device, dst_device, count) -> None
 
-# test_single_process.py
-run_case(count, n_gpus) -> None
-
 # 多进程测试（torchrun）
 main() -> int          # test_fixed_data / test_vs_torch_distributed /
                        # test_persistent_communicator / smoke_test
 
 # test_ring_schedule.cpp（纯 CPU，无需 GPU）
 # 用 ring_schedule.h 的真实下标/信号计算，在随机交错执行下模拟 1..8 个 rank，
-# 覆盖持久化通信器（含多次调用重叠时的 epoch barrier）和单进程路径
+# 覆盖持久化通信器（含多次调用重叠时的 epoch barrier）
 
 # 一键运行（编译 + 跑全套；多进程测试默认使用全部可见 GPU，可用 NPROC=N 覆盖；
 # < 2 卡自动跳过多进程测试）
@@ -335,7 +305,6 @@ classDiagram
         <<pybind11 module>>
         tiny_reduce_sum()
         tiny_copy_peer()
-        tiny_ring_allreduce_sum()
     }
     class RingCommunicator {
         allreduce(sendbuff, recvbuff, count)
@@ -343,9 +312,6 @@ classDiagram
         -all_gather()
         -signal()
         -wait_for()
-    }
-    class tiny_ring_allreduce_sum_impl {
-        <<function>>
     }
     class IpcHandle {
         <<struct>>
@@ -364,17 +330,12 @@ classDiagram
     }
 
     tiny --> RingCommunicator : 绑定类
-    tiny --> tiny_ring_allreduce_sum_impl : 单进程多卡
 
     RingCommunicator *-- IpcHandle : handles_
     RingCommunicator --> ipc : 交换/打开远端句柄
     RingCommunicator --> transport : transport_copy_ipc
     RingCommunicator --> kernels : reduce kernel
     RingCommunicator --> ring_schedule : chunk 下标 / 信号值
-
-    tiny_ring_allreduce_sum_impl --> transport : transport_copy
-    tiny_ring_allreduce_sum_impl --> kernels : reduce kernel
-    tiny_ring_allreduce_sum_impl --> ring_schedule : chunk 下标
 
     ipc ..> IpcHandle : 创建 / 读写文件
 ```

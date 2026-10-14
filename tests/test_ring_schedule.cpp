@@ -1,7 +1,7 @@
 // CPU-only check of the ring AllReduce schedule in src/ring_schedule.h.
 //
 // No GPU needed: each rank's work is modelled as the same sequence of stream
-// operations RingCommunicator / tiny_ring_allreduce_sum_impl issue (waits,
+// operations RingCommunicator issues (waits,
 // copies, reductions, signals), and a random scheduler interleaves the ranks
 // in any order the GPU-side dependencies allow. Copies and reductions are
 // split into separate read and write operations so write-after-read races
@@ -33,8 +33,8 @@ void fail(const std::string& message) {
     g_failures++;
 }
 
-// One queued stream operation: runnable() gates it (a cuStreamWaitValue32 or
-// the host-side sync), run() performs it.
+// One queued stream operation: runnable() gates it (a cuStreamWaitValue32),
+// run() performs it.
 struct Op {
     std::function<bool()> runnable;
     std::function<void()> run;
@@ -236,51 +236,6 @@ void check_persistent_overlapping(int n, int calls, std::mt19937& rng) {
             }
 }
 
-// ---------------------------------------------------------------------------
-// Single-process path: mirrors tiny_ring_allreduce_sum_impl. Steps are
-// separated by cudaDeviceSynchronize on every GPU; inside a step all GPUs run
-// concurrently, so their reads and writes are interleaved at random.
-// ---------------------------------------------------------------------------
-
-void check_single_process(int n, std::mt19937& rng) {
-    std::uniform_int_distribution<Value> dist(-1000000, 1000000);
-    std::vector<std::vector<Value>> buf(n, std::vector<Value>(n));
-    std::vector<Value> expected(n, 0);
-    for (int r = 0; r < n; r++)
-        for (int c = 0; c < n; c++) {
-            buf[r][c] = dist(rng);
-            expected[c] += buf[r][c];
-        }
-
-    auto run_step = [&](const std::function<int(int)>& chunk_of, bool reduce) {
-        std::vector<Rank> ranks(n);
-        std::vector<Value> scratch(n, 0);
-        for (int i = 0; i < n; i++) {
-            const int prev = ring::prev_rank(i, n);
-            const int idx = chunk_of(i);
-            ranks[i].ops.push_back(always([&scratch, &buf, i, prev, idx] {
-                scratch[i] = buf[prev][idx];
-            }));
-            ranks[i].ops.push_back(always([&scratch, &buf, i, idx, reduce] {
-                buf[i][idx] = reduce ? buf[i][idx] + scratch[i] : scratch[i];
-            }));
-        }
-        run_random(ranks, rng);
-    };
-
-    for (int s = 0; s < n - 1; s++)
-        run_step([&](int i) { return ring::rs_chunk(i, s, n); }, true);
-    for (int s = 0; s < n - 1; s++)
-        run_step([&](int i) { return ring::ag_chunk(i, s, n); }, false);
-
-    for (int r = 0; r < n; r++)
-        if (buf[r] != expected) {
-            fail("single-process n=" + std::to_string(n) +
-                 " rank=" + std::to_string(r) + ": wrong result");
-            return;
-        }
-}
-
 void check_owned_chunk(int n) {
     // owned_chunk documents where reduce-scatter leaves the full sum, and is
     // what all-gather step 0 must read from prev.
@@ -307,7 +262,6 @@ int main() {
         for (int t = 0; t < kTrials && g_failures == before; t++) {
             check_persistent(n, 3, rng);
             check_persistent_overlapping(n, 4, rng);
-            check_single_process(n, rng);
         }
         std::printf("n=%d: %s\n", n, g_failures == before ? "OK" : "FAIL");
     }

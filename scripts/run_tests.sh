@@ -114,7 +114,6 @@ fi
 
 run kernels "$PYTHON" tests/test_kernels.py
 run transport "$PYTHON" tests/test_transport.py
-run single "$PYTHON" tests/test_single_process.py
 
 # Multi-process tests use every visible GPU (override with NPROC=N), so 4- and
 # 8-GPU machines exercise the ring with more than two ranks.
