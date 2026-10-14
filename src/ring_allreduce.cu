@@ -2,6 +2,8 @@
 
 #include <cuda.h>
 
+#include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -63,16 +65,40 @@ const MemOps& mem_ops() {
     return ops;
 }
 
+void ensure_mem_ops_available() {
+    (void)mem_ops();
+}
+
+// A call emits 1 + 2*steps signals in this order: input copied, then the
+// reduce-scatter steps, then the all-gather steps. After signal k the counter
+// reaches base + k + 1, so a rank waits for the done-signal of the previous
+// dependency.
+uint32_t input_ready_signal(uint32_t base) {
+    return base + 1;
+}
+
+uint32_t rs_step_signal(uint32_t base, int step) {
+    return base + step + 2;
+}
+
+uint32_t ag_step_signal(uint32_t base, int steps, int step) {
+    return base + steps + step + 2;
+}
+
+uint32_t rs_step_dependency(uint32_t base, int step) {
+    return step == 0 ? input_ready_signal(base)
+                     : rs_step_signal(base, step - 1);
+}
+
+uint32_t ag_step_dependency(uint32_t base, int steps, int step) {
+    return step == 0 ? rs_step_signal(base, steps - 1)
+                     : ag_step_signal(base, steps, step - 1);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
 // RingCommunicator
-//
-// Everything persistent is set up once. Synchronization is GPU-side: each rank
-// owns a monotonically increasing 32-bit counter in device memory; a rank
-// signals progress with cuStreamWriteValue32 and waits on its neighbour with
-// cuStreamWaitValue32. No files, events or host round-trips remain in the
-// steady-state path.
 // ---------------------------------------------------------------------------
 
 RingCommunicator::RingCommunicator(int my_rank, int world_size,
@@ -110,15 +136,15 @@ void RingCommunicator::initialize() {
 }
 
 void RingCommunicator::setup_stream_and_buffers() {
-    const size_t max_chunk = max_count_ / static_cast<size_t>(world_size_);
+    ensure_mem_ops_available();
 
-    (void)mem_ops();  // fail fast if the driver entry points are unavailable
+    const size_t max_chunk = max_count_ / static_cast<size_t>(world_size_);
     check_cuda_ipc(cudaGetDevice(&local_dev_), "cudaGetDevice", my_rank_,
                    "init", -1);
     check_cuda_ipc(cudaStreamCreate(&stream_), "cudaStreamCreate", my_rank_,
                    "init", -1);
-    check_cuda_ipc(cudaMalloc(&tmp_, max_chunk * sizeof(float)),
-                   "cudaMalloc(tmp)", my_rank_, "init", -1);
+    check_cuda_ipc(cudaMalloc(&scratch_, max_chunk * sizeof(float)),
+                   "cudaMalloc(scratch)", my_rank_, "init", -1);
     check_cuda_ipc(cudaMalloc(&commbuff_, max_count_ * sizeof(float)),
                    "cudaMalloc(commbuff)", my_rank_, "init", -1);
     check_cuda_ipc(
@@ -181,8 +207,12 @@ void RingCommunicator::allreduce(float* sendbuff, float* recvbuff,
             "count must be positive, <= max_count and divisible by world_size");
     }
 
-    const uint32_t base =
-        static_cast<uint32_t>(epoch_ * static_cast<size_t>(signals_per_call()));
+    const size_t per_call = static_cast<size_t>(signals_per_call());
+    if (epoch_ >= (std::numeric_limits<uint32_t>::max)() / per_call) {
+        throw std::runtime_error(
+            "signal counter would overflow; create a new communicator");
+    }
+    const uint32_t base = static_cast<uint32_t>(epoch_ * per_call);
     epoch_++;
 
     // Wait until every rank has finished the previous call before we reuse the
@@ -195,7 +225,7 @@ void RingCommunicator::allreduce(float* sendbuff, float* recvbuff,
     check_cuda_ipc(cudaMemcpyAsync(commbuff_, sendbuff, count * sizeof(float),
                                    cudaMemcpyDeviceToDevice, stream_),
                    "cudaMemcpy(init)", my_rank_, "init", -1);
-    signal(base + 1);
+    signal(input_ready_signal(base));
 
     reduce_scatter(count, base);
     all_gather(count, base);
@@ -214,19 +244,17 @@ void RingCommunicator::reduce_scatter(size_t count, uint32_t base) {
     for (int step = 0; step < steps_; step++) {
         const int idx = (my_rank_ - step + world_size_) % world_size_;
 
-        // Signal numbering per call: 0 = input copied, 1..steps =
-        // reduce-scatter steps, steps+1..2*steps = all-gather steps. After
-        // signal k the counter holds base + k + 1.
-        wait_for(prev_, base + step + 1, "reduce-scatter");
-        transport_copy_ipc(tmp_, local_dev_, remote_ptrs_[prev_] + idx * chunk,
+        wait_for(prev_, rs_step_dependency(base, step), "reduce-scatter");
+        transport_copy_ipc(scratch_, local_dev_,
+                           remote_ptrs_[prev_] + idx * chunk,
                            handles_[prev_].device, chunk_bytes, stream_);
 
         tiny_reduce_sum_kernel(commbuff_ + idx * chunk, commbuff_ + idx * chunk,
-                               tmp_, chunk, stream_);
+                               scratch_, chunk, stream_);
         check_cuda_ipc(cudaGetLastError(), "kernel launch", my_rank_, "RS",
                        step);
 
-        signal(base + step + 2);
+        signal(rs_step_signal(base, step));
     }
 }
 
@@ -237,18 +265,16 @@ void RingCommunicator::all_gather(size_t count, uint32_t base) {
     for (int step = 0; step < steps_; step++) {
         const int chunk_idx = (my_rank_ - step - 1 + world_size_) % world_size_;
 
-        // Step 0 waits for prev's last reduce-scatter; later steps wait for
-        // prev's previous all-gather.
-        wait_for(prev_, base + steps_ + step + 1, "all-gather");
-        transport_copy_ipc(tmp_, local_dev_,
+        wait_for(prev_, ag_step_dependency(base, steps_, step), "all-gather");
+        transport_copy_ipc(scratch_, local_dev_,
                            remote_ptrs_[prev_] + chunk_idx * chunk,
                            handles_[prev_].device, chunk_bytes, stream_);
         check_cuda_ipc(
-            cudaMemcpyAsync(commbuff_ + chunk_idx * chunk, tmp_, chunk_bytes,
-                            cudaMemcpyDeviceToDevice, stream_),
+            cudaMemcpyAsync(commbuff_ + chunk_idx * chunk, scratch_,
+                            chunk_bytes, cudaMemcpyDeviceToDevice, stream_),
             "cudaMemcpy(AG local)", my_rank_, "AG", step);
 
-        signal(base + steps_ + step + 2);
+        signal(ag_step_signal(base, steps_, step));
     }
 }
 
@@ -271,19 +297,120 @@ void RingCommunicator::teardown() {
             ipc_close_handle(remote_counters_[r]);
         }
     }
-    if (stream_)
+    remote_ptrs_.clear();
+    remote_counters_.clear();
+    handles_.clear();
+
+    if (stream_) {
         cudaStreamDestroy(stream_);
-    if (tmp_)
-        cudaFree(tmp_);
-    if (commbuff_)
+        stream_ = nullptr;
+    }
+    if (scratch_) {
+        cudaFree(scratch_);
+        scratch_ = nullptr;
+    }
+    if (commbuff_) {
         cudaFree(commbuff_);
-    if (counter_)
+        commbuff_ = nullptr;
+    }
+    if (counter_) {
         cudaFree(counter_);
+        counter_ = nullptr;
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Entry points
 // ---------------------------------------------------------------------------
+
+namespace {
+
+// Owns the per-device streams and scratch buffers of the single-process path so
+// that a partial setup failure still releases what was already acquired.
+class DeviceStreamBuffers {
+public:
+    DeviceStreamBuffers(int n_gpus, size_t chunk_bytes)
+        : streams_(static_cast<size_t>(n_gpus), nullptr),
+          scratch_(static_cast<size_t>(n_gpus), nullptr) {
+        try {
+            for (int i = 0; i < n_gpus; i++) {
+                check_cuda(cudaSetDevice(i), "cudaSetDevice");
+                check_cuda(cudaStreamCreate(&streams_[i]), "cudaStreamCreate");
+                check_cuda(cudaMalloc(&scratch_[i], chunk_bytes), "cudaMalloc");
+            }
+        } catch (...) {
+            release();
+            throw;
+        }
+    }
+
+    ~DeviceStreamBuffers() { release(); }
+
+    DeviceStreamBuffers(const DeviceStreamBuffers&) = delete;
+    DeviceStreamBuffers& operator=(const DeviceStreamBuffers&) = delete;
+
+    cudaStream_t stream(int i) const { return streams_[i]; }
+    float* scratch(int i) const { return scratch_[i]; }
+
+private:
+    void release() {
+        for (size_t i = 0; i < streams_.size(); i++) {
+            if (streams_[i])
+                cudaStreamDestroy(streams_[i]);
+            if (scratch_[i])
+                cudaFree(scratch_[i]);
+        }
+    }
+
+    std::vector<cudaStream_t> streams_;
+    std::vector<float*> scratch_;
+};
+
+void impl_reduce_scatter(float** recv, int n_gpus, size_t chunk,
+                         size_t chunk_bytes,
+                         const DeviceStreamBuffers& buffers) {
+    for (int step = 0; step < n_gpus - 1; step++) {
+        for (int i = 0; i < n_gpus; i++) {
+            const int prev = (i - 1 + n_gpus) % n_gpus;
+            const int idx = (i - step + n_gpus) % n_gpus;
+
+            check_cuda(cudaSetDevice(i), "cudaSetDevice");
+            transport_copy(buffers.scratch(i), i, recv[prev] + idx * chunk,
+                           prev, chunk_bytes, buffers.stream(i));
+
+            tiny_reduce_sum_kernel(recv[i] + idx * chunk, recv[i] + idx * chunk,
+                                   buffers.scratch(i), chunk,
+                                   buffers.stream(i));
+        }
+
+        for (int i = 0; i < n_gpus; i++) {
+            check_cuda(cudaSetDevice(i), "cudaSetDevice");
+            check_cuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        }
+    }
+}
+
+void impl_all_gather(float** recv, int n_gpus, size_t chunk, size_t chunk_bytes,
+                     const DeviceStreamBuffers& buffers) {
+    for (int step = 0; step < n_gpus - 1; step++) {
+        for (int i = 0; i < n_gpus; i++) {
+            const int own_chunk = i;
+            const int send_dst = (i + 1) % n_gpus;
+
+            check_cuda(cudaSetDevice(send_dst), "cudaSetDevice");
+            transport_copy(recv[send_dst] + own_chunk * chunk, send_dst,
+                           recv[i] + own_chunk * chunk, i, chunk_bytes,
+                           buffers.stream(send_dst));
+        }
+
+        for (int dev = 0; dev < n_gpus; dev++) {
+            check_cuda(cudaSetDevice(dev), "cudaSetDevice");
+            check_cuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+        }
+    }
+}
+
+}  // namespace
 
 void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
                                   int n_gpus) {
@@ -295,62 +422,14 @@ void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
     const size_t chunk = count / static_cast<size_t>(n_gpus);
     const size_t chunk_bytes = chunk * sizeof(float);
 
-    std::vector<cudaStream_t> stream(n_gpus);
-    std::vector<float*> tmp(n_gpus, nullptr);
-
-    for (int i = 0; i < n_gpus; i++) {
-        check_cuda(cudaSetDevice(i), "cudaSetDevice");
-        check_cuda(cudaStreamCreate(&stream[i]), "cudaStreamCreate");
-        check_cuda(cudaMalloc(&tmp[i], chunk_bytes), "cudaMalloc");
-    }
+    DeviceStreamBuffers buffers(n_gpus, chunk_bytes);
 
     for (int i = 0; i < n_gpus; i++) {
         synchronized_copy(recv[i], send[i], count, i);
     }
 
-    // Reduce-Scatter
-    for (int step = 0; step < n_gpus - 1; step++) {
-        for (int i = 0; i < n_gpus; i++) {
-            const int prev = (i - 1 + n_gpus) % n_gpus;
-            const int idx = (i - step + n_gpus) % n_gpus;
-
-            check_cuda(cudaSetDevice(i), "cudaSetDevice");
-            transport_copy(tmp[i], i, recv[prev] + idx * chunk, prev,
-                           chunk_bytes, stream[i]);
-
-            tiny_reduce_sum_kernel(recv[i] + idx * chunk, recv[i] + idx * chunk,
-                                   tmp[i], chunk, stream[i]);
-        }
-
-        for (int i = 0; i < n_gpus; i++) {
-            check_cuda(cudaSetDevice(i), "cudaSetDevice");
-            check_cuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-        }
-    }
-
-    // All-Gather
-    for (int step = 0; step < n_gpus - 1; step++) {
-        for (int i = 0; i < n_gpus; i++) {
-            const int own_chunk = i;
-            const int send_dst = (i + 1) % n_gpus;
-
-            check_cuda(cudaSetDevice(send_dst), "cudaSetDevice");
-            transport_copy(recv[send_dst] + own_chunk * chunk, send_dst,
-                           recv[i] + own_chunk * chunk, i, chunk_bytes,
-                           stream[send_dst]);
-        }
-
-        for (int dev = 0; dev < n_gpus; dev++) {
-            check_cuda(cudaSetDevice(dev), "cudaSetDevice");
-            check_cuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
-        }
-    }
-
-    for (int i = 0; i < n_gpus; i++) {
-        check_cuda(cudaSetDevice(i), "cudaSetDevice");
-        check_cuda(cudaStreamDestroy(stream[i]), "cudaStreamDestroy");
-        check_cuda(cudaFree(tmp[i]), "cudaFree");
-    }
+    impl_reduce_scatter(recv, n_gpus, chunk, chunk_bytes, buffers);
+    impl_all_gather(recv, n_gpus, chunk, chunk_bytes, buffers);
 }
 
 void tiny_ring_allreduce_sum_ipc(int my_rank, int world_size, float* sendbuff,
