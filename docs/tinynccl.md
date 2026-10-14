@@ -391,20 +391,3 @@ classDiagram
     TestHarness ..> scripts/run_tests.sh : entry point
 ```
 
----
-
-## 5. 同步协议（`RingCommunicator`）
-
-每次 `allreduce` 发出 `1 + 2 * steps` 个计数器信号，顺序为：输入已拷贝 → 各 reduce-scatter 步 → 各 all-gather 步。设 `base = epoch * (1 + 2*steps)`，信号 `k` 完成后计数器值为 `base + k + 1`：
-
-| 信号 | 计数器值 | 等待方 |
-|------|----------|--------|
-| 输入已拷贝 | `base + 1` | reduce-scatter 第 0 步 |
-| RS 第 `step` 步完成 | `base + step + 2` | reduce-scatter 第 `step+1` 步 |
-| AG 第 `step` 步完成 | `base + steps + step + 2` | all-gather 第 `step+1` 步 |
-
-每个 rank：
-
-1. 调用开始先等所有 rank 计数器到达 `base`（上一轮已结束），以保证复用的 `commbuff_` 不被提前覆盖；
-2. 用 `cuStreamWriteValue32` 递增自己的计数器，用 `cuStreamWaitValue32`（`GEQ`）等待邻居；
-3. 全部在 stream 上异步推进，steady-state 不涉及文件、事件创建或 CPU 往返。
