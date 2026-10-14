@@ -25,17 +25,17 @@ def main() -> int:
         return 0
 
     ipc_root = make_ipc_root("random", rank, local_rank)
+    comm_dir = os.path.join(ipc_root, "comm")
+    if rank == 0:
+        os.makedirs(comm_dir, exist_ok=True)
+    barrier(local_rank)
 
-    all_ok = True
     base_seed = 12345
     counts = [world, world * 4, world * 16, world * 1024]
+    comm = tiny.RingCommunicator(rank, world, max(counts), comm_dir)
 
+    all_ok = True
     for count in counts:
-        ipc_dir = os.path.join(ipc_root, f"count_{count}")
-        if rank == 0:
-            os.makedirs(ipc_dir, exist_ok=True)
-        barrier(local_rank)
-
         torch.manual_seed(base_seed + rank)
         send = torch.randn(count, device="cuda")
 
@@ -44,7 +44,8 @@ def main() -> int:
         barrier(local_rank)
 
         recv = torch.empty_like(send)
-        tiny.tiny_ring_allreduce_sum_ipc(rank, world, send, recv, ipc_dir)
+        torch.cuda.synchronize()
+        comm.allreduce(send, recv)
         barrier(local_rank)
 
         local_ok = torch.allclose(recv, reference, atol=1e-5, rtol=1e-5)

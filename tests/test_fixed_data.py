@@ -25,22 +25,24 @@ def main() -> int:
         return 0
 
     ipc_root = make_ipc_root("fixed", rank, local_rank)
+    comm_dir = os.path.join(ipc_root, "comm")
+    if rank == 0:
+        os.makedirs(comm_dir, exist_ok=True)
+    barrier(local_rank)
+
+    counts = [world, world * 4, world * 16]
+    comm = tiny.RingCommunicator(rank, world, max(counts), comm_dir)
 
     all_ok = True
-    counts = [world, world * 4, world * 16]
     for count in counts:
-        ipc_dir = os.path.join(ipc_root, f"count_{count}")
-        if rank == 0:
-            os.makedirs(ipc_dir, exist_ok=True)
-        barrier(local_rank)
-
         # Rank r contributes r * 1000 + [0, 1, ..., count - 1].
         values = torch.arange(count, dtype=torch.float32, device="cuda")
         send = values + rank * 1000.0
         recv = torch.empty_like(send)
         expected = values * world + 1000.0 * sum(range(world))
+        torch.cuda.synchronize()
 
-        tiny.tiny_ring_allreduce_sum_ipc(rank, world, send, recv, ipc_dir)
+        comm.allreduce(send, recv)
         barrier(local_rank)
 
         local_ok = torch.allclose(recv, expected, atol=1e-5, rtol=1e-5)
@@ -57,7 +59,7 @@ def main() -> int:
 
     cleanup_ipc_root(ipc_root, rank, local_rank)
     if rank == 0:
-        print("PASS: fixed-data IPC tests" if all_ok else "FAIL: fixed-data IPC tests")
+        print("PASS: fixed-data tests" if all_ok else "FAIL: fixed-data tests")
     dist.destroy_process_group()
     return 0 if all_ok else 1
 

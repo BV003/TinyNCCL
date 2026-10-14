@@ -14,11 +14,6 @@
 void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
                                   int n_gpus);
 
-// Stateless multi-process variant: rebuilds the CUDA IPC setup on every call.
-void tiny_ring_allreduce_sum_ipc(int my_rank, int world_size, float* sendbuff,
-                                 float* recvbuff, size_t count,
-                                 const std::string& ipc_dir);
-
 // Persistent communicator: set up once, then call allreduce repeatedly.
 //
 // Synchronization is entirely GPU-side: each rank owns a monotonically

@@ -74,17 +74,14 @@ torchrun --nproc_per_node=2 scripts/benchmark.py \
   --counts 2048 32768 524288 \
   --warmup 2 \
   --iters 10
-
-# use the persistent RingCommunicator instead of the stateless API
-torchrun --nproc_per_node=2 scripts/benchmark.py --persistent
 ```
 
-Two entry points are exposed:
+The multi-process API is the persistent communicator:
 
-- `tiny.tiny_ring_allreduce_sum_ipc(...)` — stateless, rebuilds the IPC setup on
-  every call.
-- `tiny.RingCommunicator(rank, world, max_count, ipc_dir)` — persistent, sets up
-  once and exposes `allreduce(send, recv)`.
+```python
+comm = tiny.RingCommunicator(rank, world, max_count, ipc_dir)  # set up once
+comm.allreduce(send, recv)                                     # reuse many times
+```
 
 ## Measured Results
 
@@ -93,22 +90,21 @@ Test environment: one host, two NVIDIA H800 PCIe GPUs (MIG disabled),
 
 | Implementation | count | bytes/rank | latency (ms) | busbw (GB/s) |
 |---------------|-------|-----------|--------------|--------------|
-| Tiny-Persist  |  2048 |   0.01 MB |        0.064 |         0.13 |
+| Tiny          |  2048 |   0.01 MB |        0.064 |         0.13 |
 | NCCL          |  2048 |   0.01 MB |        0.060 |         0.14 |
-| Tiny-Persist  | 32768 |   0.13 MB |        0.078 |         1.67 |
+| Tiny          | 32768 |   0.13 MB |        0.078 |         1.67 |
 | NCCL          | 32768 |   0.13 MB |        0.061 |         2.13 |
-| Tiny-Persist  |524288 |   2.10 MB |        0.210 |         9.97 |
+| Tiny          |524288 |   2.10 MB |        0.210 |         9.97 |
 | NCCL          |524288 |   2.10 MB |        0.176 |        11.90 |
 
-`Tiny-Persist` is within ~1.1–1.3x of NCCL across all sizes. For reference, the
-original stateless path measured ~33 ms on two L4 GPUs — constant across sizes,
-i.e. entirely host-side bootstrap overhead, not GPU time.
+TinyNCCL is within ~1.1–1.3x of NCCL across all sizes. For reference, the
+original per-call bootstrap design measured ~33 ms on two L4 GPUs — constant
+across sizes, i.e. entirely host-side overhead, not GPU time.
 
 ## Analysis
 
-- The stateless API rebuilds the IPC setup on every call. Profiling showed the
-  cost was dominated by `cudaIpcOpenMemHandle` (~2.35 ms) plus the file-based
-  handle/event rendezvous.
+- Profiling the original per-call design showed the cost was dominated by
+  `cudaIpcOpenMemHandle` (~2.35 ms) plus the file-based handle rendezvous.
 - `RingCommunicator` sets up the stream, buffers, memory mapping and GPU-side
   synchronization once. Each `allreduce` then only submits work to the stream.
 - Synchronization uses a per-rank monotonic 32-bit counter in device memory,
@@ -136,6 +132,5 @@ Currently implemented: single-node, multi-process CUDA IPC Ring AllReduce:
   `RingCommunicator`)
 - Reduce-Scatter and All-Gather are synchronized with GPU-side memory counters,
   driven entirely in-stream
-- A stateless `tiny_ring_allreduce_sum_ipc` wrapper is kept for compatibility
 
 Cross-node communication is not supported yet. It requires TCP, InfiniBand, RoCE, or RDMA transport.

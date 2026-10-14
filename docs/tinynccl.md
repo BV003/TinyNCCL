@@ -2,10 +2,10 @@
 
 TinyNCCL 是一个用于学习 NCCL 与分布式集合通信的轻量实现：单机多卡、基于 CUDA IPC 的 Ring AllReduce。对外以 PyTorch C++ 扩展 `tiny` 暴露，内部由 `ipc` / `transport` / `kernels` / `cuda_check` / `ring_allreduce` 几个模块协作完成。
 
-提供两条路径：
+多进程 API 是持久化 communicator：通信建立一次，之后重复 `allreduce`；同步完全走 GPU 侧的内存计数器。
 
-- `tiny_ring_allreduce_sum_ipc(...)`：无状态，每次调用重建 CUDA IPC 通信。
-- `tiny.RingCommunicator(...)`：持久化，通信建立一次，之后重复 `allreduce`；同步完全走 GPU 侧的内存计数器。
+- `tiny.RingCommunicator(rank, world, max_count, ipc_dir)`
+- `comm.allreduce(send, recv)`
 
 ---
 
@@ -117,7 +117,6 @@ class NodeTopology:
 tiny_reduce_sum(dst, a, b) -> None
 tiny_copy_peer(dst, src) -> None
 tiny_ring_allreduce_sum(sendbuffs, recvbuffs) -> None
-tiny_ring_allreduce_sum_ipc(my_rank, world_size, sendbuff, recvbuff, ipc_dir) -> None
 
 RingCommunicator(my_rank, world_size, max_count, ipc_dir)   # 类
     .allreduce(sendbuff, recvbuff) -> None
@@ -200,11 +199,6 @@ void tiny_reduce_sum_kernel(float* dst, const float* a, const float* b,
 // 单进程多 GPU 版本（保留用于单进程测试）
 void tiny_ring_allreduce_sum_impl(float** send, float** recv,
                                   size_t count, int n_gpus);
-
-// 无状态多进程版本（每次重建通信）
-void tiny_ring_allreduce_sum_ipc(int my_rank, int world_size,
-                                 float* sendbuff, float* recvbuff,
-                                 size_t count, const std::string& ipc_dir);
 ```
 
 内部辅助（匿名命名空间）：
@@ -238,9 +232,6 @@ void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b);
 void tiny_copy_peer(torch::Tensor dst, torch::Tensor src);
 void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
                              std::vector<torch::Tensor> recvbuffs);
-void ipc_allreduce_wrapper(int64_t my_rank, int64_t world_size,
-                           torch::Tensor sendbuff, torch::Tensor recvbuff,
-                           std::string ipc_dir);
 ```
 
 内部校验辅助（匿名命名空间）：
@@ -274,8 +265,7 @@ def parse_args() -> argparse.Namespace
 def barrier(local_rank: int) -> None
 def check_result(result, reference) -> bool
 def _time(run_once, warmup, iters, local_rank) -> float
-def run_tiny(...)             # 无状态
-def run_tiny_persistent(...)  # 持久化 RingCommunicator
+def run_tiny(...)             # 持久化 RingCommunicator
 def run_nccl(...)             # torch.distributed 基线
 def format_result(name, count, seconds, world) -> str
 def main() -> int
@@ -364,7 +354,7 @@ classDiagram
     TinyExtension --> RingCommunicator : binds
     TinyExtension --> Transport : tiny_copy_peer
     TinyExtension --> Kernels : tiny_reduce_sum
-    TinyExtension ..> RingAllReduce : tiny_ring_allreduce_sum(_impl) / _ipc
+    TinyExtension ..> RingAllReduce : tiny_ring_allreduce_sum (single-process)
 
     RingCommunicator --> RingAllReduce : allreduce / reduce_scatter / all_gather
     RingCommunicator --> Transport : transport_copy_ipc

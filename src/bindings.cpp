@@ -8,7 +8,6 @@
 #include "kernels.h"
 #include "transport.h"
 #include "ring_allreduce.h"
-#include "ipc.h"
 
 namespace {
 
@@ -95,18 +94,6 @@ void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
     tiny_ring_allreduce_sum_impl(send.data(), recv.data(), count, n);
 }
 
-void ipc_allreduce_wrapper(int64_t my_rank, int64_t world_size,
-                           torch::Tensor sendbuff, torch::Tensor recvbuff,
-                           std::string ipc_dir) {
-    require_allreduce_inputs(sendbuff, recvbuff,
-                             static_cast<size_t>(world_size));
-
-    const size_t count = sendbuff.numel();
-    tiny_ring_allreduce_sum_ipc(
-        static_cast<int>(my_rank), static_cast<int>(world_size),
-        sendbuff.data_ptr<float>(), recvbuff.data_ptr<float>(), count, ipc_dir);
-}
-
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("tiny_reduce_sum", &tiny_reduce_sum,
           "Element-wise float32 sum: dst = a + b");
@@ -114,9 +101,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "Copy data between CUDA devices: dst = src");
     m.def("tiny_ring_allreduce_sum", &tiny_ring_allreduce_sum,
           "Ring AllReduce (sum) across GPUs in a single process");
-    m.def(
-        "tiny_ring_allreduce_sum_ipc", &ipc_allreduce_wrapper,
-        "Ring AllReduce (sum) across GPUs in multiple processes via CUDA IPC");
 
     pybind11::class_<RingCommunicator>(m, "RingCommunicator")
         .def(pybind11::init<int, int, size_t, std::string>(),

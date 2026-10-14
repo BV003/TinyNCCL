@@ -1,4 +1,4 @@
-"""End-to-end benchmark for TinyNCCL CUDA IPC AllReduce.
+"""End-to-end benchmark for TinyNCCL's persistent CUDA IPC AllReduce.
 
 Run with torchrun, for example:
 
@@ -32,12 +32,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iters", type=int, default=10)
     parser.add_argument("--skip-nccl", action="store_true")
-    parser.add_argument(
-        "--persistent",
-        action="store_true",
-        help="use the persistent RingCommunicator instead of the "
-        "stateless API",
-    )
     parser.add_argument(
         "--ipc-root",
         default="/tmp/tinynccl_benchmark",
@@ -83,47 +77,13 @@ def run_tiny(
 ) -> tuple[float, torch.Tensor]:
     recv = torch.empty_like(send)
 
-    warmup_dirs = [root / f"tiny_warmup_{i}" for i in range(warmup)]
-    iter_dirs = [root / f"tiny_iter_{i}" for i in range(iters)]
-    if rank == 0:
-        for directory in warmup_dirs + iter_dirs:
-            directory.mkdir(parents=True, exist_ok=True)
-    barrier(local_rank)
-
-    call = {"n": 0}
-
-    def run_once() -> None:
-        # The stateless API bootstraps IPC handles on every invocation and
-        # needs a fresh shared directory for each one.
-        i = call["n"]
-        call["n"] += 1
-        directory = warmup_dirs[i] if i < warmup else iter_dirs[i - warmup]
-        tiny.tiny_ring_allreduce_sum_ipc(rank, world, send, recv, str(directory))
-
-    seconds = _time(run_once, warmup, iters, local_rank)
-    return seconds, recv
-
-
-def run_tiny_persistent(
-    send: torch.Tensor,
-    rank: int,
-    world: int,
-    local_rank: int,
-    root: Path,
-    warmup: int,
-    iters: int,
-) -> tuple[float, torch.Tensor]:
-    recv = torch.empty_like(send)
-
     comm_dir = root / "comm"
     if rank == 0:
         comm_dir.mkdir(parents=True, exist_ok=True)
     barrier(local_rank)
 
     comm = tiny.RingCommunicator(rank, world, send.numel(), str(comm_dir))
-    seconds = _time(
-        lambda: comm.allreduce(send, recv), warmup, iters, local_rank
-    )
+    seconds = _time(lambda: comm.allreduce(send, recv), warmup, iters, local_rank)
     return seconds, recv
 
 
@@ -145,9 +105,7 @@ def run_nccl(
 
 def format_result(name: str, count: int, seconds: float, world: int) -> str:
     bytes_per_rank = count * 4
-    bus_bandwidth = (
-        2.0 * (world - 1) / world * bytes_per_rank / seconds / 1e9
-    )
+    bus_bandwidth = 2.0 * (world - 1) / world * bytes_per_rank / seconds / 1e9
     return (
         f"{name:<10} count={count:>10} "
         f"bytes={bytes_per_rank / 1e6:>8.2f} MB "
@@ -206,16 +164,10 @@ def main() -> int:
                 count_root.mkdir(parents=True, exist_ok=True)
             barrier(local_rank)
 
-            if args.persistent:
-                tiny_seconds, tiny_result = run_tiny_persistent(
-                    send, rank, world, local_rank, count_root,
-                    args.warmup, args.iters,
-                )
-            else:
-                tiny_seconds, tiny_result = run_tiny(
-                    send, rank, world, local_rank, count_root,
-                    args.warmup, args.iters,
-                )
+            tiny_seconds, tiny_result = run_tiny(
+                send, rank, world, local_rank, count_root,
+                args.warmup, args.iters,
+            )
 
             if not args.skip_nccl:
                 nccl_seconds, nccl_result = run_nccl(
@@ -227,8 +179,7 @@ def main() -> int:
                 tiny_ok = True
 
             if rank == 0:
-                label = "Tiny-Persist" if args.persistent else "Tiny-IPC"
-                print(format_result(label, count, tiny_seconds, world))
+                print(format_result("Tiny", count, tiny_seconds, world))
                 if nccl_seconds is not None:
                     print(format_result("NCCL", count, nccl_seconds, world))
                     print(f"  correctness: {'OK' if tiny_ok else 'FAIL'}")

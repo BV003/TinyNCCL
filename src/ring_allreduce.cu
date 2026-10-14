@@ -431,10 +431,3 @@ void tiny_ring_allreduce_sum_impl(float** send, float** recv, size_t count,
     impl_reduce_scatter(recv, n_gpus, chunk, chunk_bytes, buffers);
     impl_all_gather(recv, n_gpus, chunk, chunk_bytes, buffers);
 }
-
-void tiny_ring_allreduce_sum_ipc(int my_rank, int world_size, float* sendbuff,
-                                 float* recvbuff, size_t count,
-                                 const std::string& ipc_dir) {
-    RingCommunicator communicator(my_rank, world_size, count, ipc_dir);
-    communicator.allreduce(sendbuff, recvbuff, count);
-}
