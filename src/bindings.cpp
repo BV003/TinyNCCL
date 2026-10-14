@@ -1,16 +1,41 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <vector>
+
+#include <cstddef>
 #include <string>
+#include <vector>
+
 #include "kernels.h"
 #include "transport.h"
 #include "ring_allreduce.h"
 #include "ipc.h"
 
+namespace {
+
+void require_same_shape(const torch::Tensor& a, const torch::Tensor& b,
+                        const char* message) {
+    TORCH_CHECK(a.sizes().vec() == b.sizes().vec(), message);
+}
+
+void require_float32(const torch::Tensor& tensor, const char* name) {
+    TORCH_CHECK(tensor.dtype() == torch::kFloat32, name, " must be float32");
+}
+
+void require_cuda(const torch::Tensor& tensor, const char* name) {
+    TORCH_CHECK(tensor.is_cuda(), name, " must be a CUDA tensor");
+}
+
+void require_divisible(size_t count, size_t divisor, const char* name) {
+    TORCH_CHECK(count % divisor == 0,
+                name, " must be divisible by ", divisor);
+}
+
+}  // namespace
+
 void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
-    TORCH_CHECK(a.sizes().vec() == b.sizes().vec(), "a and b must have same shape");
-    TORCH_CHECK(a.dtype() == torch::kFloat32, "only float32 supported");
-    dst.resize_(a.sizes());
+    require_same_shape(a, b, "a and b must have same shape");
+    require_float32(a, "a");
+    dst.resize_(a.sizes());  // output shape follows the inputs
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
     int n = a.numel();
     tiny_reduce_sum_kernel(
@@ -21,9 +46,10 @@ void tiny_reduce_sum(torch::Tensor dst, torch::Tensor a, torch::Tensor b) {
 }
 
 void tiny_copy_peer(torch::Tensor dst, torch::Tensor src) {
-    TORCH_CHECK(src.sizes().vec() == dst.sizes().vec(), "src and dst must have same shape");
+    require_same_shape(src, dst, "src and dst must have same shape");
     TORCH_CHECK(src.dtype() == dst.dtype(), "src and dst must have same dtype");
-    TORCH_CHECK(src.is_cuda() && dst.is_cuda(), "both tensors must be CUDA");
+    require_cuda(src, "src");
+    require_cuda(dst, "dst");
     cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
     int src_dev = src.get_device();
     int dst_dev = dst.get_device();
@@ -38,25 +64,25 @@ void tiny_copy_peer(torch::Tensor dst, torch::Tensor src) {
 
 void tiny_ring_allreduce_sum(std::vector<torch::Tensor> sendbuffs,
                              std::vector<torch::Tensor> recvbuffs) {
-    int n = static_cast<int>(sendbuffs.size());
+    const int n = static_cast<int>(sendbuffs.size());
     TORCH_CHECK(n >= 1, "need at least 1 GPU");
     TORCH_CHECK(static_cast<int>(recvbuffs.size()) == n,
                 "sendbuffs and recvbuffs must have the same size");
-    TORCH_CHECK(sendbuffs[0].dtype() == torch::kFloat32, "only float32 supported");
-    size_t count = sendbuffs[0].numel();
-    TORCH_CHECK(count % static_cast<size_t>(n) == 0,
-                "numel must be divisible by the number of GPUs");
+    require_float32(sendbuffs[0], "sendbuffs");
+
+    const size_t count = sendbuffs[0].numel();
+    require_divisible(count, static_cast<size_t>(n), "numel");
 
     std::vector<float*> send(n), recv(n);
     for (int i = 0; i < n; i++) {
-        TORCH_CHECK(sendbuffs[i].is_cuda() && recvbuffs[i].is_cuda(),
-                    "tensors must be CUDA");
+        require_cuda(sendbuffs[i], "sendbuffs");
+        require_cuda(recvbuffs[i], "recvbuffs");
         TORCH_CHECK(sendbuffs[i].get_device() == i,
                     "sendbuffs must be ordered by device index");
         TORCH_CHECK(recvbuffs[i].get_device() == i,
                     "recvbuffs must be ordered by device index");
         TORCH_CHECK(sendbuffs[i].numel() == static_cast<int64_t>(count) &&
-                    recvbuffs[i].numel() == static_cast<int64_t>(count),
+                        recvbuffs[i].numel() == static_cast<int64_t>(count),
                     "all tensors must have the same size");
         send[i] = sendbuffs[i].data_ptr<float>();
         recv[i] = recvbuffs[i].data_ptr<float>();
@@ -70,14 +96,15 @@ void ipc_allreduce_wrapper(
     torch::Tensor sendbuff, torch::Tensor recvbuff,
     std::string ipc_dir)
 {
-    TORCH_CHECK(sendbuff.dtype() == torch::kFloat32, "only float32 supported");
-    TORCH_CHECK(recvbuff.dtype() == torch::kFloat32, "only float32 supported");
-    TORCH_CHECK(sendbuff.is_cuda() && recvbuff.is_cuda(), "tensors must be CUDA");
-    TORCH_CHECK(sendbuff.sizes() == recvbuff.sizes(), "sendbuff and recvbuff must have same shape");
+    require_float32(sendbuff, "sendbuff");
+    require_float32(recvbuff, "recvbuff");
+    require_cuda(sendbuff, "sendbuff");
+    require_cuda(recvbuff, "recvbuff");
+    require_same_shape(sendbuff, recvbuff,
+                       "sendbuff and recvbuff must have same shape");
 
-    size_t count = sendbuff.numel();
-    TORCH_CHECK(count % static_cast<size_t>(world_size) == 0,
-                "numel must be divisible by world_size");
+    const size_t count = sendbuff.numel();
+    require_divisible(count, static_cast<size_t>(world_size), "numel");
 
     tiny_ring_allreduce_sum_ipc(
         static_cast<int>(my_rank),

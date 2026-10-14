@@ -9,6 +9,10 @@
 
 namespace {
 
+constexpr int kFileWaitMaxRetries = 1000;
+constexpr int kFileWaitRetryMicros = 10000;
+constexpr char kBarrierMarker[] = "ready\n";
+
 bool regular_file_with_size(const std::string& path, size_t expected_size) {
     struct stat st{};
     return stat(path.c_str(), &st) == 0 &&
@@ -18,13 +22,33 @@ bool regular_file_with_size(const std::string& path, size_t expected_size) {
 
 void wait_for_file(const std::string& path, size_t expected_size,
                    const char* what) {
-    constexpr int kMaxRetries = 1000;
-    for (int retry = 0; retry < kMaxRetries; retry++) {
+    for (int retry = 0; retry < kFileWaitMaxRetries; retry++) {
         if (regular_file_with_size(path, expected_size)) return;
-        usleep(10000);
+        usleep(kFileWaitRetryMicros);
     }
     throw std::runtime_error(std::string("Timeout waiting for complete ") +
                              what + ": " + path);
+}
+
+// Atomically publish `size` bytes at `data` to `path`: write a per-process
+// temp file, then rename it into place so readers never see a partial file.
+void atomic_write(const std::string& path, const void* data, size_t size) {
+    const std::string tmp_path = path + ".tmp." + std::to_string(getpid());
+    std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc);
+    if (!ofs) {
+        throw std::runtime_error("Failed to open temporary file: " + tmp_path);
+    }
+    ofs.write(static_cast<const char*>(data),
+              static_cast<std::streamsize>(size));
+    ofs.close();
+    if (!ofs) {
+        unlink(tmp_path.c_str());
+        throw std::runtime_error("Failed to write temporary file: " + tmp_path);
+    }
+    if (rename(tmp_path.c_str(), path.c_str()) != 0) {
+        unlink(tmp_path.c_str());
+        throw std::runtime_error("Failed to publish file: " + path);
+    }
 }
 
 }  // namespace
@@ -53,21 +77,7 @@ IpcHandle ipc_create_handle(void* ptr, size_t size, int device) {
 }
 
 void ipc_save_handle(const IpcHandle& handle, const std::string& path) {
-    const std::string tmp_path = path + ".tmp." + std::to_string(getpid());
-    std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc);
-    if (!ofs) {
-        throw std::runtime_error("Failed to open temporary handle file: " + tmp_path);
-    }
-    ofs.write(reinterpret_cast<const char*>(&handle), sizeof(IpcHandle));
-    if (!ofs) {
-        unlink(tmp_path.c_str());
-        throw std::runtime_error("Failed to write handle to: " + tmp_path);
-    }
-    ofs.close();
-    if (rename(tmp_path.c_str(), path.c_str()) != 0) {
-        unlink(tmp_path.c_str());
-        throw std::runtime_error("Failed to publish handle file: " + path);
-    }
+    atomic_write(path, &handle, sizeof(handle));
 }
 
 IpcHandle ipc_load_handle(const std::string& path) {
@@ -143,19 +153,11 @@ void ipc_destroy_events(IpcEventSet& events) {
 }
 
 void ipc_save_event_handles(const IpcEventSet& events, const std::string& path) {
-    const std::string tmp_path = path + ".tmp." + std::to_string(getpid());
-    std::ofstream ofs(tmp_path, std::ios::binary | std::ios::trunc);
-    if (!ofs) throw std::runtime_error("Failed to open event file: " + tmp_path);
     IpcEventHandleSet handles{};
     handles.init_ready_handle = events.init_ready_handle;
     handles.reduce_scatter_done_handle = events.reduce_scatter_done_handle;
     handles.device = events.device;
-    ofs.write(reinterpret_cast<const char*>(&handles), sizeof(handles));
-    ofs.close();
-    if (!ofs || rename(tmp_path.c_str(), path.c_str()) != 0) {
-        unlink(tmp_path.c_str());
-        throw std::runtime_error("Failed to publish event file: " + path);
-    }
+    atomic_write(path, &handles, sizeof(handles));
 }
 
 IpcEventHandleSet ipc_load_event_handles(const std::string& path) {
@@ -244,19 +246,7 @@ void ipc_barrier(
     const std::string prefix = ipc_dir + "/barrier_" + phase + "_" +
                                std::to_string(step) + "_";
     const std::string marker = prefix + "rank_" + std::to_string(my_rank);
-    const std::string tmp_marker = marker + ".tmp." + std::to_string(getpid());
-
-    {
-        std::ofstream ofs(tmp_marker, std::ios::binary | std::ios::trunc);
-        if (!ofs) {
-            throw std::runtime_error("Failed to create barrier marker: " + tmp_marker);
-        }
-        ofs << "ready\n";
-    }
-    if (rename(tmp_marker.c_str(), marker.c_str()) != 0) {
-        unlink(tmp_marker.c_str());
-        throw std::runtime_error("Failed to publish barrier marker: " + marker);
-    }
+    atomic_write(marker, kBarrierMarker, sizeof(kBarrierMarker) - 1);
 
     for (int r = 0; r < world_size; r++) {
         wait_for_file(prefix + "rank_" + std::to_string(r), 6,
