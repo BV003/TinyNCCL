@@ -32,7 +32,7 @@ class GPUInfo:
 @dataclass
 class NodeTopology:
     gpus: list[GPUInfo] = field(default_factory=list)
-    p2p_matrix: dict = field(default_factory=dict)   # {(i, j): bool}
+    p2p_matrix: dict[tuple[int, int], bool] = field(default_factory=dict)
     topo: list[list[str]] = field(default_factory=list)  # from nvidia-smi topo -m
 
 
